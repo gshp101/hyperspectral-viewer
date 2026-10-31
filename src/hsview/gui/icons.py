@@ -47,6 +47,8 @@ _SVG = {
     "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
     "prev": '<path d="m15 18-6-6 6-6"/>',
     "next": '<path d="m9 18 6-6-6-6"/>',
+    "windows": '<rect x="2" y="7" width="13" height="11" rx="1.5"/><path d="M2 10h13"/><path d="M7 7V5.5A1.5 1.5 0 0 1 8.5 4h12A1.5 1.5 0 0 1 22 5.5v9a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M15 7h7"/>',
+    "close-windows": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18"/><path d="m9.5 11.5 5 5M14.5 11.5l-5 5"/>',
     "eye": '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
 }
 

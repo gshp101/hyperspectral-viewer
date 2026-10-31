@@ -10,7 +10,7 @@ View and annotate hyperspectral image cubes. A plain Qt (PyQt6) desktop app: ima
 - **Contrast.** Contrast and bias work like the original viewer, plus a choice of shared min–max, per-channel min–max or 2–98 % stretch.
 - **Navigation.** Zoom with the wheel (centred on the cursor) and pan by dragging in Navigate mode or with the middle button in any mode.
 - **Annotations.** Points, rectangles and polygons in 7 classes (Red, Green, Blue, Yellow, Magenta, Turquoise, White). Right-click removes the annotation under the cursor. Select mode moves, recolours and deletes annotations. Undo and redo are supported.
-- **Spectra.** The live panel shows annotation spectra (mean ±1σ for regions), the pixel under the cursor, means per class, and the class means of a segmentation overlay. The Plot menu draws one subplot per class, as the original viewer did.
+- **Spectra.** The live panel shows annotation spectra (mean ±1σ for regions), the pixel under the cursor, means per class, and the class means of a segmentation overlay. The Plot menu draws one subplot per class, as the original viewer did, or, with *Plot → One window per class*, each class in its own window.
 - **Overlays.** Integer images are shown as segmentations and anything else as a heat map, with visibility and opacity controls.
 - **Files.** Annotations save to the original viewer's `.pkl` layout (or JSON). *Save annotation spectra* writes the original spectra pickle, and spectra can also be exported to CSV.
 - **Fully customizable toolbars.** Right-click any toolbar, or use *Edit → Customize toolbars and shortcuts…*, to:
@@ -22,6 +22,8 @@ View and annotate hyperspectral image cubes. A plain Qt (PyQt6) desktop app: ima
   Toolbars can be dragged to any edge or floated. Everything is remembered between sessions.
 
 ![Customize toolbars](docs/customize-toolbars.png)
+
+- **Application icon.** Choose one of eight icons under *View → Application icon*; the choice is remembered.
 
 ## Supported files
 

@@ -5,8 +5,10 @@ import math
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import QPoint, QSettings, Qt
+from PyQt6.QtGui import QActionGroup
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDockWidget,
     QFileDialog,
@@ -24,6 +26,7 @@ from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
 from ..io import Cube, LoadError, cube_file_filter, load_cube, resolve_image_id
 from .actions import ActionRegistry
 from .display_panel import DisplayPanel
+from .app_icons import APP_ICONS, DEFAULT_APP_ICON, app_icon
 from .icons import swatch_icon
 from .image_view import ImageView
 from .overlay_panel import OverlayPanel
@@ -125,6 +128,9 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state is not None:
             self.restoreState(state)
+        sep = self.registry["plot_separate"]
+        sep.setChecked(self.settings.value("plot/separate_windows", False, type=bool))
+        sep.toggled.connect(lambda on: self.settings.setValue("plot/separate_windows", on))
         self.registry["mode_navigate"].setChecked(True)
         self.registry["class_0"].setChecked(True)
         self._update_actions()
@@ -174,6 +180,7 @@ class MainWindow(QMainWindow):
             "reset_contrast": self.display.reset_contrast,
             "plot_points": lambda: self.plot_by_class("point"),
             "plot_regions": lambda: self.plot_by_class("region"),
+            "close_plots": self.close_plot_windows,
             "about": self.about,
         }
         for action_id, slot in slots.items():
@@ -203,7 +210,7 @@ class MainWindow(QMainWindow):
             "&View": ["zoom_in", "zoom_out", "zoom_fit", "zoom_actual", None, "prev_band", "next_band",
                       "true_colour", "reverse_rgb", "reset_contrast", None,
                       "toggle_display", "toggle_overlays", "toggle_spectra"],
-            "&Plot": ["plot_points", "plot_regions"],
+            "&Plot": ["plot_points", "plot_regions", None, "plot_separate", "close_plots"],
             "&Help": ["about"],
         }
         for title, ids in menus.items():
@@ -217,6 +224,29 @@ class MainWindow(QMainWindow):
                 menu.addSeparator()
                 self.toolbar_menu = menu.addMenu("Toolbars")
                 self.toolbar_menu.aboutToShow.connect(self._fill_toolbar_menu)
+                self._build_app_icon_menu(menu.addMenu("Application icon"))
+
+    def _build_app_icon_menu(self, menu):
+        group = QActionGroup(self)
+        current = self.settings.value("app/icon", DEFAULT_APP_ICON)
+        for key, (label, _) in APP_ICONS.items():
+            act = menu.addAction(app_icon(key), label)
+            act.setCheckable(True)
+            act.setChecked(key == current)
+            act.triggered.connect(lambda _, k=key: self.set_app_icon(k))
+            group.addAction(act)
+        self.set_app_icon(current)
+
+    def set_app_icon(self, key: str):
+        """Use one of the candidate icons for this window and the application, and remember it."""
+        if key not in APP_ICONS:
+            key = DEFAULT_APP_ICON
+        icon = app_icon(key)
+        self.setWindowIcon(icon)
+        app = QApplication.instance()
+        if app is not None:
+            app.setWindowIcon(icon)
+        self.settings.setValue("app/icon", key)
 
     def _fill_toolbar_menu(self):
         self.toolbar_menu.clear()
@@ -435,10 +465,26 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Nothing to plot",
                                     "There are no points." if which == "point" else "There are no rectangles or polygons.")
             return None
-        title = "Point spectra by class" if which == "point" else "Region mean spectra by class"
-        dlg = ClassPlotDialog(self.cube, groups, f"{title} — {self.cube.name}", self)
-        dlg.show()
-        return dlg
+        title = "Point spectra" if which == "point" else "Region mean spectra"
+        if self.registry["plot_separate"].isChecked():
+            # One window per class, cascaded so they don't hide each other.
+            dialogs = []
+            origin = self.geometry().topLeft() + QPoint(60, 60)
+            for i, cls in enumerate(sorted(groups)):
+                dlg = ClassPlotDialog(self.cube, {cls: groups[cls]},
+                                      f"{title} — {CLASS_NAMES[cls]} — {self.cube.name}", self)
+                dlg.move(origin + QPoint(30 * i, 30 * i))
+                dialogs.append(dlg)
+        else:
+            dialogs = [ClassPlotDialog(self.cube, groups, f"{title} by class — {self.cube.name}", self)]
+        for dlg in dialogs:
+            dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dlg.show()
+        return dialogs
+
+    def close_plot_windows(self):
+        for dlg in self.findChildren(ClassPlotDialog):
+            dlg.close()
 
     # --------------------------------------------------------------- misc
     def about(self):

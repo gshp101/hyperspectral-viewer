@@ -138,9 +138,25 @@ def test_spectrum_panel_lines(win):
 def test_plot_by_class(win):
     win.store.add("point", 0, [[5, 5]])
     win.store.add("point", 3, [[6, 5]])
-    dlg = win.plot_by_class("point")
+    win.store.add("point", 3, [[7, 5]])
+    (dlg,) = win.plot_by_class("point")
     assert len([ax for ax in dlg.figure.axes if ax.axison]) == 2
     dlg.close()
+
+
+def test_plot_each_class_in_its_own_window(win):
+    win.store.add("point", 0, [[5, 5]])
+    win.store.add("point", 3, [[6, 5]])
+    win.store.add("point", 3, [[7, 5]])
+    win.store.add("rect", 1, [[30, 5], [50, 25]])
+    win.registry["plot_separate"].setChecked(True)
+    assert win.settings.value("plot/separate_windows", type=bool)
+    dialogs = win.plot_by_class("point")
+    assert [d.windowTitle().split(" — ")[1] for d in dialogs] == ["Red", "Yellow"]
+    yellow = dialogs[1].figure.axes[0]
+    assert len(yellow.lines) == 2  # both yellow points, nothing else
+    win.close_plot_windows()
+    assert all(not d.isVisible() for d in dialogs)
 
 
 def test_save_and_load_annotations(win, tmp_path):
@@ -233,3 +249,15 @@ def test_icons_render(qapp):
 
     for name in ICON_NAMES:
         assert not icon(name).pixmap(24, 24).isNull(), name
+
+
+def test_app_icon_choice_persists(win):
+    from hsview.gui.app_icons import APP_ICONS, render_app_icon
+
+    for key in APP_ICONS:
+        assert not render_app_icon(key, 32).isNull()
+    win.set_app_icon("prism")
+    assert win.settings.value("app/icon") == "prism"
+    assert not win.windowIcon().isNull()
+    win.set_app_icon("nonsense")
+    assert win.settings.value("app/icon") == "hypercube"

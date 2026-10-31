@@ -69,6 +69,9 @@ SPECS = [
     # Plot
     ActionSpec("plot_points", "Plot point spectra by class", "plot-points", "", "", "Plot"),
     ActionSpec("plot_regions", "Plot region spectra by class", "plot-regions", "", "Mean spectrum of each rectangle and polygon", "Plot"),
+    ActionSpec("plot_separate", "One window per class", "windows", "",
+               "Plot each annotation class in its own window instead of one window of subplots", "Plot", True),
+    ActionSpec("close_plots", "Close plot windows", "close-windows", "", "", "Plot"),
     # Help
     ActionSpec("about", "About hsview", "info", "", "", "Help"),
 ] + [
