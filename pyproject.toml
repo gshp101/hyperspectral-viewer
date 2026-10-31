@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hsview"
-version = "0.1.0"
+version = "0.2.0"
 description = "View and annotate hyperspectral image cubes"
 requires-python = ">=3.10"
 dependencies = [
-    "napari[pyqt6]>=0.5",
+    "PyQt6>=6.5",
     "numpy",
     "matplotlib",
-    "scikit-image",
+    "pillow",
     "spectral",
     "h5py",
+    "hdf5storage",
     "tifffile",
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-qt"]
+test = ["pytest", "pytest-qt", "scipy"]
 
 [project.scripts]
 hsview = "hsview.app:main"

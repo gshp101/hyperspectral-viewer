@@ -1,8 +1,8 @@
 """hsview: view and annotate hyperspectral image cubes."""
-from .io import Cube, load_cube, load_overlay
+from .io import Cube, LoadError, load_cube, load_overlay
 
-__version__ = "0.1.0"
-__all__ = ["Cube", "load_cube", "load_overlay", "launch"]
+__version__ = "0.2.0"
+__all__ = ["Cube", "LoadError", "load_cube", "load_overlay", "launch"]
 
 
 def launch(cube=None, overlays=(), annotations=None, block=True):
