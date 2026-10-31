@@ -57,7 +57,7 @@ DEFAULT_CONFIG = {
         {"name": "View", "visible": True, "items": [
             "zoom_in", "zoom_out", "zoom_fit", "zoom_actual", SEPARATOR,
             "prev_band", "next_band", "band_readout", SEPARATOR,
-            "true_colour", "reset_contrast", SEPARATOR, "plot_points", "plot_regions"]},
+            "true_colour", "reset_contrast", SEPARATOR, "plot_points", "plot_regions", "plot_separate"]},
     ],
 }
 

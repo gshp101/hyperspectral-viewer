@@ -140,7 +140,10 @@ class ClassPlotDialog(QDialog):
     def __init__(self, cube: Cube, groups: dict[int, list[np.ndarray]], title: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(900, 300 + 160 * max(0, (len(groups) - 1) // 2))
+        if len(groups) == 1:
+            self.resize(720, 440)
+        else:
+            self.resize(900, 300 + 160 * max(0, (len(groups) - 1) // 2))
         fig = Figure(layout="constrained")
         canvas = FigureCanvasQTAgg(fig)
         lay = QVBoxLayout(self)
