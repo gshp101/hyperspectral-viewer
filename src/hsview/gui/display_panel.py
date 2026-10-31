@@ -2,8 +2,9 @@
 
 Three band channels and a reference image can each be routed to the red,
 green or blue display channel, or shown alone as a gray (or, for the
-reference, colour) image. A channel's source is a single band, a sum/mean of
-bands, or a spectral filter. Contrast and bias work like the original viewer.
+reference, colour) image; the reference can also be blended over the band
+display. A channel's source is a single band (optionally averaged over a
+window of neighbouring bands), a sum/mean of bands, or a spectral filter. Contrast and bias work like the original viewer.
 """
 from __future__ import annotations
 
@@ -32,10 +33,17 @@ from ..io import Cube, LoadError, load_filter, read_image
 from ..processing import SCALINGS, apply_filter, band_image, compose, contrast_bias_lut, parse_band_spec, spectral_energy
 
 ROUTES = ("None", "Red", "Green", "Blue", "Gray")
-REF_ROUTES = ("None", "Show")
+REF_ROUTES = ("None", "Show", "Overlay")
 SOURCES = ("Band", "Band sum", "Filter")
 SCALING_LABELS = {"global": "Shared min–max", "channel": "Per-channel min–max", "percentile": "Per-channel 2–98 %"}
 DEFAULT_CONTRAST, DEFAULT_BIAS = 45, 0
+
+
+def band_window(center: int, width: int, n_bands: int) -> range:
+    """The ``width`` bands centred on ``center``, shifted to stay inside 0..n_bands-1."""
+    width = max(1, min(int(width), n_bands))
+    start = min(max(0, int(center) - (width - 1) // 2), n_bands - width)
+    return range(start, start + width)
 
 
 def _hslider(lo, hi, value):
@@ -74,7 +82,7 @@ class BandChannel(QGroupBox):
         self.stack = QStackedWidget()
         # Band
         w = QWidget()
-        r = QHBoxLayout(w)
+        r = QHBoxLayout()
         r.setContentsMargins(0, 0, 0, 0)
         self.slider = _hslider(0, 0, 0)
         self.spin = QSpinBox()
@@ -83,6 +91,24 @@ class BandChannel(QGroupBox):
         self.spin.valueChanged.connect(self._on_band)
         r.addWidget(self.slider, 1)
         r.addWidget(self.spin)
+        g = QVBoxLayout()
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setSpacing(2)
+        g.addLayout(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("Width"))
+        self.width_slider = _hslider(1, 1, 1)
+        self.width_slider.setToolTip("Average this many bands centred on the selected band")
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, 1)
+        self.width_spin.setToolTip(self.width_slider.toolTip())
+        self.width_slider.valueChanged.connect(self.width_spin.setValue)
+        self.width_spin.valueChanged.connect(self.width_slider.setValue)
+        self.width_spin.valueChanged.connect(self._invalidate)
+        r.addWidget(self.width_slider, 1)
+        r.addWidget(self.width_spin)
+        g.addLayout(r)
+        w.setLayout(g)
         self.stack.addWidget(w)
         # Band sum
         w = QWidget()
@@ -125,6 +151,10 @@ class BandChannel(QGroupBox):
             w.blockSignals(True)
             w.setRange(0, n - 1)
             w.blockSignals(False)
+        for w in (self.width_slider, self.width_spin):
+            w.blockSignals(True)
+            w.setRange(1, n)
+            w.blockSignals(False)
         if self.source.currentText() == "Filter":
             self.source.setCurrentIndex(0)
         self._update_info()
@@ -132,6 +162,14 @@ class BandChannel(QGroupBox):
     def set_band(self, b: int):
         self.source.setCurrentIndex(0)
         self.spin.setValue(int(b))
+
+    def set_width(self, width: int):
+        self.width_spin.setValue(int(width))
+
+    def bands(self) -> range:
+        """Bands averaged in Band mode."""
+        n = self.panel.cube.n_bands if self.panel.cube else 1
+        return band_window(self.spin.value(), self.width_spin.value(), n)
 
     def set_spec(self, spec: str, mode: str = "sum"):
         self.source.blockSignals(True)
@@ -178,7 +216,11 @@ class BandChannel(QGroupBox):
             return
         src = self.source.currentText()
         if src == "Band":
-            self.info.setText(cube.band_label(self.spin.value()))
+            text = cube.band_label(self.spin.value())
+            bands = self.bands()
+            if len(bands) > 1:
+                text += f", mean of {len(bands)} bands {bands[0]}–{bands[-1]}"
+            self.info.setText(text)
         elif src == "Band sum":
             try:
                 n = len(parse_band_spec(self.spec.text(), cube)) if self.spec.text().strip() else 0
@@ -212,7 +254,11 @@ class BandChannel(QGroupBox):
         if self._cache is None:
             src = self.source.currentText()
             if src == "Band":
-                self._cache = np.asarray(cube.data[:, :, self.spin.value()], dtype=np.float64)
+                bands = self.bands()
+                if len(bands) == 1:
+                    self._cache = np.asarray(cube.data[:, :, bands[0]], dtype=np.float64)
+                else:
+                    self._cache = band_image(cube, bands, "mean")
             elif src == "Band sum":
                 if not self.spec.text().strip():
                     return None
@@ -253,6 +299,14 @@ class ReferenceChannel(QGroupBox):
         row.addWidget(self.load_btn)
         row.addWidget(self.reverse_btn)
         lay.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Opacity"))
+        self.opacity = _hslider(0, 100, 50)
+        self.opacity.setToolTip("How strongly the reference image covers the bands when routed to Overlay")
+        self.opacity.valueChanged.connect(lambda _: self.changed.emit())
+        row.addWidget(self.opacity, 1)
+        lay.addLayout(row)
+        self.route.setToolTip("Show replaces the band display; Overlay blends the image over it")
         self.route.currentIndexChanged.connect(lambda _: panel._route_changed(self))
         self._sync()
 
@@ -260,6 +314,7 @@ class ReferenceChannel(QGroupBox):
         has = self.img is not None
         self.route.setEnabled(has)
         self.reverse_btn.setEnabled(has and self.img.ndim == 3)
+        self.opacity.setEnabled(has)
         if not has and self.route.currentIndex():
             self.route.setCurrentIndex(0)
 
@@ -395,17 +450,20 @@ class DisplayPanel(QWidget):
             return
         self._routing = True
         try:
+            # The reference's Overlay blends over whatever the bands show, so it never conflicts.
             sources = [*self.channels, self.reference]
             choice = source.route.currentText()
             exclusive = choice in ("Gray", "Show")
-            if choice != "None":
+            if choice not in ("None", "Overlay"):
                 for other in sources:
                     if other is source:
                         continue
                     o = other.route.currentText()
+                    if o == "Overlay" and choice != "Show":
+                        continue
                     if exclusive or o in ("Gray", "Show") or o == choice:
                         other.route.setCurrentIndex(0)
-            elif all(s.route.currentIndex() == 0 for s in sources):
+            if self.reference.route.currentText() != "Show" and all(c.route.currentIndex() == 0 for c in self.channels):
                 self.channels[0].route.setCurrentText("Gray")
         finally:
             self._routing = False
@@ -453,8 +511,25 @@ class DisplayPanel(QWidget):
         if self.cube is None:
             return None
         scaling = self.scaling.currentData()
-        if self.reference.route.currentText() == "Show" and self.reference.img is not None:
+        ref_route = self.reference.route.currentText() if self.reference.img is not None else "None"
+        if ref_route == "Show":
             return compose(gray=self.reference.img, scaling=scaling)
+        base = self._band_composite(scaling)
+        if ref_route == "Overlay":
+            ref = compose(gray=self.reference.img, scaling=scaling)
+            if base is None:
+                return ref
+            alpha = self.reference.opacity.value() / 100
+            if ref.ndim == 2:
+                ref = ref[:, :, None]
+            if base.ndim == 2:
+                base = base[:, :, None]
+            out = (1 - alpha) * base + alpha * ref
+            out = np.rint(out).astype(np.uint8)
+            return np.ascontiguousarray(out if out.shape[2] == 3 else out[:, :, 0])
+        return base
+
+    def _band_composite(self, scaling):
         rgb = {}
         for ch in self.channels:
             route = ch.route.currentText()
