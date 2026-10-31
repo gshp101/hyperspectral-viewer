@@ -106,9 +106,9 @@ def _probe_cube_icon(variant: str) -> str:
 
 
 APP_ICONS: dict[str, tuple[str, str]] = {
-    "scene-cube": ("Scene cube + probe", _probe_cube_icon("side")),
-    "scene-cube-above": ("Scene cube + probe (spectrum above)", _probe_cube_icon("above")),
-    "scene-cube-light": ("Scene cube + probe (light)", _probe_cube_icon("light")),
+    "scene-cube-light": ("Scene cube + probe", _probe_cube_icon("light")),
+    "scene-cube": ("Scene cube + probe (dark, spectrum beside)", _probe_cube_icon("side")),
+    "scene-cube-above": ("Scene cube + probe (dark, spectrum above)", _probe_cube_icon("above")),
     "hypercube": ("Hypercube", _svg(
         # Isometric cube: photo-like top, rainbow band stripes down the two side faces.
         '<rect width="256" height="256" rx="56" fill="#1d2433"/>'
@@ -169,7 +169,7 @@ APP_ICONS: dict[str, tuple[str, str]] = {
         f'<linearGradient id="bg" x1="0" y1="1" x2="1" y2="0">{_RAINBOW}</linearGradient>')),
 }
 
-DEFAULT_APP_ICON = "scene-cube"
+DEFAULT_APP_ICON = "scene-cube-light"
 
 
 def render_app_icon(name: str, size: int) -> QPixmap:
