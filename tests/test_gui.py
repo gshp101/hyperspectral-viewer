@@ -260,4 +260,4 @@ def test_app_icon_choice_persists(win):
     assert win.settings.value("app/icon") == "prism"
     assert not win.windowIcon().isNull()
     win.set_app_icon("nonsense")
-    assert win.settings.value("app/icon") == "hypercube"
+    assert win.settings.value("app/icon") == "scene-cube-light"

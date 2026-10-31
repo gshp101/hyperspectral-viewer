@@ -23,7 +23,7 @@ View and annotate hyperspectral image cubes. A plain Qt (PyQt6) desktop app: ima
 
 ![Customize toolbars](docs/customize-toolbars.png)
 
-- **Application icon.** Choose one of eight icons under *View → Application icon*; the choice is remembered.
+- **Application icon.** Choose an icon under *View → Application icon* (default: the light scene cube with a pixel probe, also saved as `hsview-icon.png` in the repo root); the choice is remembered.
 
 ## Supported files
 
