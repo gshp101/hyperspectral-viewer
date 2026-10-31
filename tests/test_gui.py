@@ -261,3 +261,40 @@ def test_app_icon_choice_persists(win):
     assert not win.windowIcon().isNull()
     win.set_app_icon("nonsense")
     assert win.settings.value("app/icon") == "scene-cube-light"
+
+
+def test_band_window_averages_centred_bands(win):
+    from hsview.gui.display_panel import band_window
+
+    assert list(band_window(10, 5, 40)) == [8, 9, 10, 11, 12]
+    assert list(band_window(10, 4, 40)) == [9, 10, 11, 12]
+    assert list(band_window(0, 5, 40)) == [0, 1, 2, 3, 4]  # shifted to stay inside the cube
+    assert list(band_window(39, 5, 40)) == [35, 36, 37, 38, 39]
+    ch = win.display.channels[0]
+    ch.set_band(20)
+    assert np.array_equal(ch.image(), win.cube.data[:, :, 20])
+    ch.set_width(5)
+    assert np.allclose(ch.image(), win.cube.data[:, :, 18:23].mean(axis=2))
+    assert "mean of 5 bands 18–22" in ch.info.text()
+    ch.spin.setValue(30)  # moving the centre keeps the width
+    assert np.allclose(ch.image(), win.cube.data[:, :, 28:33].mean(axis=2))
+
+
+def test_reference_overlay_blends_over_bands(win):
+    d = win.display
+    d.update_image()
+    bands = d.composite()
+    ref = d.reference
+    ref.route.setCurrentText("Overlay")
+    assert d.channels[0].route.currentText() == "Gray"  # overlay keeps the band display
+    ref.opacity.setValue(0)
+    assert np.array_equal(d.composite()[:, :, 0], bands)
+    ref.opacity.setValue(100)
+    assert np.array_equal(d.composite(), ref.img[:, :, :3])
+    ref.opacity.setValue(50)
+    mid = d.composite()
+    assert mid.shape == ref.img.shape[:2] + (3,)
+    d.channels[1].route.setCurrentText("Red")  # choosing colours keeps the overlay
+    assert ref.route.currentText() == "Overlay"
+    ref.route.setCurrentText("Show")
+    assert all(c.route.currentText() == "None" for c in d.channels)

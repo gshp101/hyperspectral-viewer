@@ -6,7 +6,7 @@ View and annotate hyperspectral image cubes. A plain Qt (PyQt6) desktop app: ima
 
 ## Features
 
-- **Display.** There are three band channels plus a reference image. Each channel's source is a single band (slider), a sum or mean of bands (`10-20, 35` or `650-700nm`), or a spectral filter loaded from a `.pkl`. Route each channel to red, green or blue, or show one alone as gray. The true colour preset builds RGB from wavelength ranges.
+- **Display.** There are three band channels plus a reference image. Each channel's source is a single band (slider, with a *Width* slider that averages that many bands centred on it), a sum or mean of bands (`10-20, 35` or `650-700nm`), or a spectral filter loaded from a `.pkl`. Route each channel to red, green or blue, or show one alone as gray. The true colour preset builds RGB from wavelength ranges. The reference image (for example a pickle's `lbl`) can replace the display (*Show*) or be blended over it (*Overlay*) with its own opacity slider.
 - **Contrast.** Contrast and bias work like the original viewer, plus a choice of shared min–max, per-channel min–max or 2–98 % stretch.
 - **Navigation.** Zoom with the wheel (centred on the cursor) and pan by dragging in Navigate mode or with the middle button in any mode.
 - **Annotations.** Points, rectangles and polygons in 7 classes (Red, Green, Blue, Yellow, Magenta, Turquoise, White). Right-click removes the annotation under the cursor. Select mode moves, recolours and deletes annotations. Undo and redo are supported.
