@@ -30,7 +30,85 @@ def _bands(x0, y0, w, h, n=7, vertical=False):
     return "".join(out)
 
 
+# A little landscape drawn in a 100x100 square, mapped onto a cube's top face.
+_SCENE = (
+    '<rect width="100" height="100" fill="#8fd3ff"/>'
+    '<rect y="0" width="100" height="45" fill="#bfe8ff"/>'
+    '<circle cx="78" cy="18" r="10" fill="#ffd43b"/>'
+    '<path d="M0 58 L22 30 L40 52 L58 24 L84 58 Z" fill="#7d8ca8"/>'
+    '<path d="M50 34 L58 24 L66 34 Z" fill="#ffffff"/>'
+    '<path d="M0 56 Q30 46 55 56 T100 54 V100 H0 Z" fill="#5cbf4a"/>'
+    '<path d="M0 74 Q40 64 100 72 V100 H0 Z" fill="#3e9e3a"/>'
+    '<ellipse cx="68" cy="82" rx="20" ry="7" fill="#3aa0e8"/>'
+    '<rect x="22" y="62" width="4" height="12" fill="#7a4b2a"/>'
+    '<circle cx="24" cy="58" r="9" fill="#2f8f3a"/>'
+)
+_STRIPES = ["#6a3df0", "#2f6bff", "#18b6c9", "#3cc04a", "#f2d22e", "#ff8a1f", "#e8333a"]
+
+
+def _scene_cube(cx: float, top: float, w: float, depth: float, outline: str, probe=(62, 70)) -> str:
+    """Isometric cube: scene on top, spectral band stripes down the sides, one probed pixel.
+
+    ``cx``/``top`` place the back corner, ``w`` is the half-width of the top face and
+    ``depth`` the height of the sides. Returns the SVG and leaves the probed pixel's
+    centre in ``_scene_cube.probe_xy``.
+    """
+    h = w * 46 / 84  # isometric slope of the reference drawing
+    L, B, R, F = (cx - w, top + h), (cx, top), (cx + w, top + h), (cx, top + 2 * h)
+    a, b, c, d = w / 100, -h / 100, w / 100, h / 100  # unit square -> top face
+    out = [f'<g transform="matrix({a:.4f} {b:.4f} {c:.4f} {d:.4f} {L[0]:.2f} {L[1]:.2f})">{_SCENE}'
+           f'<rect x="{probe[0] - 5}" y="{probe[1] - 5}" width="10" height="10" fill="#ffffff" stroke="{outline}" stroke-width="3"/></g>']
+    n = len(_STRIPES)
+    for i, col in enumerate(_STRIPES):  # bands run down the sides: violet at the top
+        y0, y1 = depth * i / n, depth * (i + 1) / n + 0.6
+        out.append(f'<polygon points="{L[0]},{L[1] + y0} {F[0]},{F[1] + y0} {F[0]},{F[1] + y1} {L[0]},{L[1] + y1}" fill="{col}"/>')
+        out.append(f'<polygon points="{F[0]},{F[1] + y0} {R[0]},{R[1] + y0} {R[0]},{R[1] + y1} {F[0]},{F[1] + y1}" fill="{col}" fill-opacity=".82"/>')
+        out.append(f'<polygon points="{F[0]},{F[1] + y0} {R[0]},{R[1] + y0} {R[0]},{R[1] + y1} {F[0]},{F[1] + y1}" fill="#000000" fill-opacity=".12"/>')
+    out.append(f'<path d="M{L[0]} {L[1]} L{B[0]} {B[1]} L{R[0]} {R[1]} L{F[0]} {F[1]} Z M{L[0]} {L[1]} V{L[1] + depth} '
+               f'L{F[0]} {F[1] + depth} L{R[0]} {R[1] + depth} V{R[1]} M{F[0]} {F[1]} V{F[1] + depth}" fill="none" '
+               f'stroke="{outline}" stroke-width="{max(3, w / 18):.1f}" stroke-linejoin="round"/>')
+    u, v = probe
+    _scene_cube.probe_xy = (L[0] + a * u + c * v, L[1] + b * u + d * v)
+    return "".join(out)
+
+
+def _spectrum_card(x, y, w, h, outline, curve="#10151f", bg="#ffffff") -> str:
+    pts = [(0.0, .78), (.12, .74), (.24, .40), (.34, .30), (.44, .52), (.56, .62), (.68, .20), (.80, .16), (.90, .46), (1.0, .40)]
+    px = lambda t: x + 8 + t * (w - 16)
+    py = lambda t: y + 8 + t * (h - 16)
+    d = "M" + " L".join(f"{px(t):.1f} {py(v):.1f}" for t, v in pts)
+    return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="8" fill="{bg}" stroke="{outline}" stroke-width="5"/>'
+            f'<path d="{d}" fill="none" stroke="url(#spec)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+            f'<path d="M{x + 8} {y + h - 8} H{x + w - 8}" stroke="{curve}" stroke-opacity=".35" stroke-width="3"/>')
+
+
+def _probe_cube_icon(variant: str) -> str:
+    defs = f'<linearGradient id="spec" x1="0" y1="0" x2="1" y2="0">{_RAINBOW}</linearGradient>'
+    if variant == "side":  # cube on the left, spectrum card on the right, leader line from the probed pixel
+        cube = _scene_cube(88, 56, 68, 92, "#1d2433")
+        px, py = _scene_cube.probe_xy
+        body = ('<rect width="256" height="256" rx="56" fill="#1d2433"/>' + cube
+                + f'<path d="M{px:.1f} {py:.1f} L180 72" stroke="#ffffff" stroke-width="4" stroke-dasharray="7 6"/>'
+                + _spectrum_card(162, 30, 80, 66, "#ffffff"))
+    elif variant == "above":  # spectrum card floating above the cube
+        cube = _scene_cube(128, 104, 86, 82, "#1d2433")
+        px, py = _scene_cube.probe_xy
+        body = ('<rect width="256" height="256" rx="56" fill="#1d2433"/>' + cube
+                + f'<path d="M{px:.1f} {py:.1f} L150 90" stroke="#ffffff" stroke-width="4" stroke-dasharray="7 6"/>'
+                + _spectrum_card(100, 18, 120, 74, "#ffffff"))
+    else:  # "light": light tile, larger cube, compact card bottom-right
+        cube = _scene_cube(112, 34, 84, 100, "#1d2433")
+        px, py = _scene_cube.probe_xy
+        body = ('<rect width="256" height="256" rx="56" fill="#eef2f8"/>' + cube
+                + f'<path d="M{px:.1f} {py:.1f} L190 168" stroke="#1d2433" stroke-width="4" stroke-dasharray="7 6"/>'
+                + _spectrum_card(160, 160, 82, 64, "#1d2433"))
+    return _svg(body, defs)
+
+
 APP_ICONS: dict[str, tuple[str, str]] = {
+    "scene-cube": ("Scene cube + probe", _probe_cube_icon("side")),
+    "scene-cube-above": ("Scene cube + probe (spectrum above)", _probe_cube_icon("above")),
+    "scene-cube-light": ("Scene cube + probe (light)", _probe_cube_icon("light")),
     "hypercube": ("Hypercube", _svg(
         # Isometric cube: photo-like top, rainbow band stripes down the two side faces.
         '<rect width="256" height="256" rx="56" fill="#1d2433"/>'
@@ -91,7 +169,7 @@ APP_ICONS: dict[str, tuple[str, str]] = {
         f'<linearGradient id="bg" x1="0" y1="1" x2="1" y2="0">{_RAINBOW}</linearGradient>')),
 }
 
-DEFAULT_APP_ICON = "hypercube"
+DEFAULT_APP_ICON = "scene-cube"
 
 
 def render_app_icon(name: str, size: int) -> QPixmap:
