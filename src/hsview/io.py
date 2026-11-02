@@ -230,6 +230,15 @@ def load_pickle(path: str | Path, band_axis: int | None = None, **_) -> Cube:
     return cube_from_dict(d, path.stem, band_axis)
 
 
+def save_cube(path: str | Path, cube: Cube) -> None:
+    """Write a cube as the pickled dict layout ``{'ref', 'wavelengths', 'lbl'}`` that :func:`load_pickle` reads."""
+    d = {"ref": np.asarray(cube.data), "wavelengths": cube.wavelengths}
+    if cube.reference is not None:
+        d["lbl"] = np.asarray(cube.reference)
+    with open(path, "wb") as f:
+        pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def load_mat(path: str | Path, band_axis: int | None = None, **_) -> Cube:
     """MATLAB files, both v7.3 (HDF5) and older, holding 'hypercube' or 'ref' (+ 'wavelengths', 'lbl')."""
     path = Path(path)

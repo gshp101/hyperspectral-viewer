@@ -443,6 +443,15 @@ class DisplayPanel(QWidget):
         self._readout(self.channels[0].spin.value())
         self.update_image()
 
+    def replace_cube(self, cube: Cube):
+        """Swap in a cube of the same size (e.g. an analysis result), keeping every display setting."""
+        self.cube = cube
+        self._energy = None
+        for ch in self.channels:
+            ch._cache = None
+            ch._update_info()
+        self.update_image()
+
     # --------------------------------------------------------- routing
     def _route_changed(self, source):
         """Keep routing consistent: one source per colour, Gray/Show is exclusive, never nothing."""
@@ -552,6 +561,12 @@ class DisplayPanel(QWidget):
         if img is not None and (self.contrast.value() != DEFAULT_CONTRAST or self.bias.value() != DEFAULT_BIAS):
             img = contrast_bias_lut(self.contrast.value(), self.bias.value())[img]
         self.imageChanged.emit(img)
+
+    def step_contrast(self, delta: int):
+        self.contrast.setValue(self.contrast.value() + delta)
+
+    def step_bias(self, delta: int):
+        self.bias.setValue(self.bias.value() + delta)
 
     def reset_contrast(self):
         self.contrast.setValue(DEFAULT_CONTRAST)
