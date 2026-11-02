@@ -80,4 +80,4 @@ pytest
 
 ## License
 
-Public domain, under [the Unlicense](LICENSE). Use, copy, modify and redistribute it for any purpose, with no attribution required.
+Released under the [MIT License](LICENSE). Use, copy, modify and redistribute it for any purpose, as long as the copyright notice and license text are kept.
