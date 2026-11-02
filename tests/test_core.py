@@ -338,3 +338,176 @@ def test_save_cube_round_trip(tmp_path):
     np.testing.assert_array_equal(back.data, data)
     np.testing.assert_array_equal(back.wavelengths, np.arange(6) * 10.0)
     assert back.reference.shape == ref.shape
+
+
+# ------------------------------------------------------------ cube saving
+@pytest.mark.parametrize("ext", ["pkl", "npz", "h5"])
+def test_save_processed_cube_formats_keep_history(tmp_path, ext):
+    from hsview.analysis import remove_svd_background
+    from hsview.io import save_cube
+
+    ref, wl, _, rgb = make_demo_cube(rows=20, cols=24, n_bands=12)
+    processed = remove_svd_background(Cube(ref, wl, "nm", reference=rgb), 2)
+    path = tmp_path / f"cube.{ext}"
+    save_cube(path, processed)
+    back = load_cube(path)
+    np.testing.assert_allclose(back.data, processed.data, rtol=1e-6)
+    np.testing.assert_allclose(back.wavelengths, wl)
+    np.testing.assert_array_equal(back.reference, rgb)
+    assert back.metadata["analysis"][-1]["name"] == "svd_background"
+    assert back.metadata["analysis"][-1]["k"] == 2
+
+
+def test_saved_npz_cube_is_plain_numpy(tmp_path):
+    import json
+
+    from hsview.io import save_cube
+
+    data = np.random.default_rng(0).random((5, 6, 4)).astype(np.float32)
+    save_cube(tmp_path / "c.npz", Cube(data, None, metadata={"analysis": [{"name": "x"}]}))
+    with np.load(tmp_path / "c.npz", allow_pickle=False) as z:
+        np.testing.assert_array_equal(z["ref"], data)
+        assert "wavelengths" not in z.files
+        assert json.loads(str(z["processing"])) == [{"name": "x"}]
+
+
+# ------------------------------------------------------------ segmentation
+@pytest.fixture
+def seg_cube():
+    ref, wl, lbl, rgb = make_demo_cube(n_bands=30)  # 120 x 160
+    return Cube(ref, wl, "nm", name="demo", reference=rgb), lbl
+
+
+def _purity(labels, truth):
+    """Fraction of pixels whose region's majority truth label equals their truth label."""
+    hit = 0
+    for v in np.unique(labels):
+        t = truth[labels == v]
+        hit += np.bincount(t).max()
+    return hit / truth.size
+
+
+@pytest.mark.parametrize("components,normalize", [(0, False), (5, False), (5, True)])
+def test_unsupervised_kmeans_finds_materials(seg_cube, components, normalize):
+    from hsview.analysis import segment_unsupervised
+
+    cube, truth = seg_cube
+    seg = segment_unsupervised(cube, n_clusters=4, n_components=components, normalize=normalize)
+    assert seg.labels.shape == truth.shape and seg.labels.dtype == np.int32
+    assert set(np.unique(seg.labels)) == {1, 2, 3, 4}
+    counts = [seg.pixel_counts[v] for v in (1, 2, 3, 4)]
+    assert counts == sorted(counts, reverse=True)  # largest region first
+    assert _purity(seg.labels, truth) > 0.97
+    assert not seg.supervised and seg.annotations is None
+    assert seg.mean_spectra[1].shape == (cube.n_bands,)
+
+
+def test_kmeans_is_reproducible(seg_cube):
+    from hsview.analysis import segment_unsupervised
+
+    cube, _ = seg_cube
+    a = segment_unsupervised(cube, 5, seed=3)
+    b = segment_unsupervised(cube, 5, seed=3)
+    np.testing.assert_array_equal(a.labels, b.labels)
+
+
+def _training():
+    # Class 0 (Red) on the background, 1 the disc, 2 the rectangle, 3 the ellipse (see make_demo_cube).
+    return [Annotation("rect", 0, [[2, 2], [12, 8]]),
+            Annotation("point", 1, [[45, 40]]), Annotation("point", 1, [[46, 41]]),
+            Annotation("polygon", 1, [[35, 30], [55, 30], [55, 50], [35, 50]]),
+            Annotation("rect", 2, [[90, 80], [120, 100]]),
+            Annotation("polygon", 3, [[110, 30], [130, 30], [130, 40], [110, 40]])]
+
+
+@pytest.mark.parametrize("method", ["nearest_mean", "lda", "knn"])
+def test_supervised_methods_classify(seg_cube, method):
+    from hsview.analysis import segment_supervised
+
+    cube, truth = seg_cube
+    expected = np.where(truth == 0, 1, truth + 1)  # background -> Red (label 1), material m -> label m + 1
+    seg = segment_supervised(cube, _training(), method, n_components=5)
+    assert seg.supervised and seg.method == method
+    assert (seg.labels == expected).mean() > 0.97
+    assert seg.label_names == {1: "Red", 2: "Green", 3: "Blue", 4: "Yellow"}
+    assert seg.label_colors[1] == (1.0, 0.0, 0.0)
+    assert len(seg.annotations) == 6
+    assert seg.training_labels[5, 5] == 1 and seg.training_labels[40, 45] == 2
+    assert seg.params["training_pixels"]["Blue"] == 31 * 21
+
+
+def test_supervised_needs_two_classes(seg_cube):
+    from hsview.analysis import segment_supervised
+
+    cube, _ = seg_cube
+    with pytest.raises(ValueError, match="two classes"):
+        segment_supervised(cube, [Annotation("point", 0, [[1, 1]]), Annotation("point", 0, [[500, 500]])])
+
+
+def test_training_pixels_match_annotation_spectra(seg_cube):
+    from hsview.analysis.segmentation import annotation_mask
+
+    cube, _ = seg_cube
+    for ann in _training():
+        mask = annotation_mask(ann, cube.shape[:2])
+        np.testing.assert_allclose(np.sort(cube.data[mask].astype(float).sum(axis=1)), np.sort(ann.pixels(cube).sum(axis=1)))
+
+
+def test_majority_filter_removes_speckle():
+    from hsview.analysis.segmentation import majority_filter
+
+    labels = np.ones((20, 20), np.int32)
+    labels[10:, :] = 2
+    labels[5, 5] = 3
+    out = majority_filter(labels, 3)
+    assert out[5, 5] == 1 and (out[:9] == 1).all() and (out[11:] == 2).all()
+
+
+@pytest.mark.parametrize("ext", ["pkl", "npz"])
+def test_segmentation_file_round_trip(tmp_path, seg_cube, ext):
+    from hsview.analysis import read_segmentation, save_segmentation, segment_supervised
+    from hsview.analysis.segmentation import segmentation_from_dict
+    from hsview.io import load_overlay
+
+    cube, truth = seg_cube
+    cube.metadata["analysis"] = [{"name": "svd_background", "k": 1}]
+    seg = segment_supervised(cube, _training(), n_components=5)
+    path = tmp_path / f"seg.{ext}"
+    save_segmentation(path, seg)
+    d = read_segmentation(path)
+    np.testing.assert_array_equal(d["labels"], seg.labels)
+    assert list(d["label_values"]) == [1, 2, 3, 4] and d["label_names"] == ["Red", "Green", "Blue", "Yellow"]
+    assert d["mean_spectra"].shape == (4, cube.n_bands)
+    assert d["supervised"] and d["method"] == "nearest_mean"
+    assert d["cube"]["processing"] == [{"name": "svd_background", "k": 1}]
+    assert [a["kind"] for a in d["annotations"]] == ["rect", "point", "point", "polygon", "rect", "polygon"]
+    assert d["annotations"][3]["xy"] == [[35, 30], [55, 30], [55, 50], [35, 50]]
+    np.testing.assert_array_equal(d["training_labels"], seg.training_labels)
+    np.testing.assert_allclose(d["wavelengths"], cube.wavelengths)
+    # Readable as an overlay and as annotations, and back into a Segmentation.
+    np.testing.assert_array_equal(load_overlay(path), seg.labels)
+    items = ann_io.load_annotations(path)
+    assert [(a.kind, a.cls) for a in items] == [(a.kind, a.cls) for a in seg.annotations]
+    back = segmentation_from_dict(d)
+    assert back.label_colors == seg.label_colors and len(back.annotations) == 6
+
+
+def test_segmentation_files_load_with_plain_python(tmp_path, seg_cube):
+    import json
+
+    from hsview.analysis import save_segmentation, segment_unsupervised
+
+    cube, _ = seg_cube
+    seg = segment_unsupervised(cube, 3)
+    save_segmentation(tmp_path / "s.pkl", seg)
+    save_segmentation(tmp_path / "s.npz", seg)
+    with open(tmp_path / "s.pkl", "rb") as f:
+        d = pickle.load(f)
+    assert d["format"] == "hsview-segmentation" and d["annotations"] is None
+    with np.load(tmp_path / "s.npz") as z:  # allow_pickle defaults to False
+        np.testing.assert_array_equal(z["labels"], d["labels"])
+        meta = json.loads(str(z["metadata_json"]))
+        assert meta["label_names"] == ["Cluster 1", "Cluster 2", "Cluster 3"]
+        assert "annotation_kind" not in z.files
+    with pytest.raises(LoadError, match="no annotations"):
+        ann_io.load_annotations(tmp_path / "s.pkl")

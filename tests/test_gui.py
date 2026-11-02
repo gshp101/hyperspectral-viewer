@@ -439,3 +439,141 @@ def test_svd_dialog_summary(qapp):
     dlg.k.setValue(2)
     assert "92.86 %" in dlg.summary.text()
     dlg.deleteLater()
+
+
+def test_segment_menu_and_toolbar(win):
+    titles = [m.title().replace("&", "") for m in [a.menu() for a in win.menuBar().actions()] if m]
+    assert titles.index("Segment") == titles.index("Analysis") + 1
+    ids = [a.objectName() for a in win.menus["Segment"].actions() if a.objectName()]
+    assert ids == ["segment_unsupervised", "segment_supervised", "save_segmentation", "open_segmentation"]
+    assert {"save_cube", "save_segmentation"} <= _menu_action_ids(win.menus["File"], set())
+    from hsview.gui.toolbar import DEFAULT_CONFIG
+
+    items = [i for tb in DEFAULT_CONFIG["toolbars"] for i in tb["items"]]
+    assert {"save_cube", "segment_unsupervised", "segment_supervised", "save_segmentation"} <= set(items)
+    r = win.registry
+    assert r["segment_unsupervised"].isEnabled()
+    assert not r["segment_supervised"].isEnabled()  # no annotations yet
+    assert not r["save_segmentation"].isEnabled()  # nothing to save yet
+    win.store.add("point", 0, [[5, 5]])
+    assert r["segment_supervised"].isEnabled()
+
+
+def test_unsupervised_segmentation_overlay_and_save(win, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QDialog, QFileDialog
+
+    from hsview.analysis import read_segmentation
+    from hsview.gui import segmentation
+
+    def fake_exec(dlg):
+        dlg.clusters.setValue(4)
+        dlg.components.setValue(5)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(segmentation.UnsupervisedDialog, "exec", fake_exec)
+    cube_before = win.cube
+    win.registry["segment_unsupervised"].trigger()
+    assert win.cube is cube_before  # segmentation does not replace the cube
+    ov = win.overlays.current()
+    assert ov.as_labels and ov.segmentation is not None and ov.name == "k-means (4 clusters)"
+    assert set(np.unique(ov.data)) == {1, 2, 3, 4}
+    assert win.settings.value("segment_unsupervised/clusters", type=int) == 4
+    assert win.registry["save_segmentation"].isEnabled()
+    # A second run hides the first.
+    win.registry["segment_unsupervised"].trigger()
+    assert not ov.visible and win.overlays.current().visible
+
+    path = tmp_path / "seg.npz"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    win.registry["save_segmentation"].trigger()
+    d = read_segmentation(path)
+    np.testing.assert_array_equal(d["labels"], win.overlays.current().data)
+    assert d["cube"]["name"] == "demo" and not d["supervised"]
+
+
+def test_supervised_segmentation_uses_class_colours(win, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QDialog, QFileDialog
+
+    from hsview.analysis import read_segmentation
+    from hsview.gui import segmentation
+
+    lbl = win.labels  # 60 x 80 demo: 0 background, 1 a disc
+    for cls, value in ((0, 0), (1, 1)):
+        rr, cc = np.nonzero(lbl == value)
+        for r, c in list(zip(rr, cc))[:: max(1, len(rr) // 6)][:6]:
+            win.store.add("point", cls, [[c + 0.5, r + 0.5]])
+    win.store.add("rect", 0, [[0, 0], [4, 4]])
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["classes"] = dlg.n_classes
+        seen["ok"] = dlg.ok_button.isEnabled()
+        dlg.method.setCurrentIndex(dlg.method.findData("lda"))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(segmentation.SupervisedDialog, "exec", fake_exec)
+    win.registry["segment_supervised"].trigger()
+    assert seen == {"classes": 2, "ok": True}
+    ov = win.overlays.current()
+    assert ov.segmentation.supervised and ov.segmentation.method == "lda"
+    assert (ov.data == lbl + 1).mean() > 0.95
+    assert ov.label_color(1) == (1.0, 0.0, 0.0) and ov.label_color(2) == (0.0, 1.0, 0.0)
+    # The overlay is drawn in the annotation class colours.
+    from hsview.gui.overlay_panel import colorize
+
+    rgba = colorize(ov.data, True, ov.colors)
+    r, c = np.argwhere(ov.data == 2)[0]
+    assert tuple(rgba[r, c, :3]) == (0, 255, 0)
+
+    path = tmp_path / "seg.pkl"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(path), ""))
+    win.registry["save_segmentation"].trigger()
+    d = read_segmentation(path)
+    assert len(d["annotations"]) == len(win.store) and d["supervised"]
+
+    # Open it again: same colours; load its annotations: the segmentation file is not overwritten later.
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), ""))
+    win.registry["open_segmentation"].trigger()
+    again = win.overlays.current()
+    assert again is not ov and again.colors == ov.colors
+    assert win.load_annotations(path) and win.annotation_path is None
+
+
+def test_supervised_dialog_needs_two_classes(win, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from hsview.gui import segmentation
+
+    win.store.add("point", 2, [[5, 5]])
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["ok"] = dlg.ok_button.isEnabled()
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(segmentation.SupervisedDialog, "exec", fake_exec)
+    win.registry["segment_supervised"].trigger()
+    assert seen == {"ok": False} and not win.overlays.overlays
+
+
+def test_save_processed_cube_from_menu(win, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QDialog, QFileDialog
+
+    from hsview.gui import analysis
+    from hsview.io import load_cube
+
+    monkeypatch.setattr(analysis.SVDBackgroundDialog, "exec", lambda dlg: QDialog.DialogCode.Accepted)
+    win.registry["analysis_svd_background"].trigger()
+    seen = {}
+
+    def fake_save(parent, title, default, filters):
+        seen.update(title=title, default=default, filters=filters)
+        return str(tmp_path / "processed.h5"), ""
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", fake_save)
+    win.registry["save_cube"].trigger()
+    assert seen["title"] == "Save processed cube" and "*.npz" in seen["filters"]
+    assert "[" not in seen["default"]  # the processed name is made file-safe
+    back = load_cube(tmp_path / "processed.h5")
+    np.testing.assert_allclose(back.data, win.cube.data)
+    assert back.metadata["analysis"][-1]["name"] == "svd_background"

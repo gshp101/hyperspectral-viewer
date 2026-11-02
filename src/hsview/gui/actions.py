@@ -107,6 +107,15 @@ SPECS = [
     ActionSpec("analysis_undo", "Undo last analysis", "undo", "", "Go back to the cube before the last analysis", "Analysis"),
     ActionSpec("analysis_restore", "Restore original cube", "restore", "", "Discard every analysis applied to the cube",
                "Analysis"),
+    # Segment
+    ActionSpec("segment_unsupervised", "Segment (unsupervised)…", "segment", "",
+               "Split the current cube into regions of similar spectra with k-means clustering", "Segment"),
+    ActionSpec("segment_supervised", "Segment from annotations…", "segment-supervised", "",
+               "Classify every pixel into the annotated classes (points, rectangles and polygons)", "Segment"),
+    ActionSpec("save_segmentation", "Save segmentation…", "save-segmentation", "",
+               "Save the selected segmentation overlay (.pkl or .npz) with its annotations and metadata", "Segment"),
+    ActionSpec("open_segmentation", "Open segmentation…", "layers", "",
+               "Show a saved segmentation (or any label image) as an overlay", "Segment"),
     # Help
     ActionSpec("about", "About hsview", "info", "", "", "Help"),
 ] + [
