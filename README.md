@@ -77,3 +77,7 @@ Write a function that returns `hsview.io.Cube(data, wavelengths, ...)` and regis
 pip install -e ".[test]"
 pytest
 ```
+
+## License
+
+Public domain, under [the Unlicense](LICENSE). Use, copy, modify and redistribute it for any purpose, with no attribution required.
