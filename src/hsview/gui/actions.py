@@ -11,6 +11,7 @@ from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
 from PyQt6.QtWidgets import QWidgetAction
 
 from ..annotations import CLASS_COLORS, CLASS_NAMES
+from .analysis import ANALYSES
 from .icons import icon, swatch_icon
 
 
@@ -38,6 +39,8 @@ SPECS = [
     ActionSpec("save_annotations_as", "Save annotations as…", "", "Ctrl+Shift+S", "", "File"),
     ActionSpec("save_spectra", "Save annotation spectra…", "spectra-file", "Ctrl+D", "Pickle of all spectra under the annotations", "File"),
     ActionSpec("export_csv", "Export spectra to CSV…", "table", "", "One column per annotation, one row per band", "File"),
+    ActionSpec("save_cube", "Save cube as…", "save-cube", "",
+               "Save the current (possibly processed) cube as a pickle with ref, wavelengths and lbl", "File"),
     ActionSpec("quit", "Quit", "quit", "Ctrl+Q", "", "File"),
     # Edit
     ActionSpec("undo", "Undo", "undo", "Ctrl+Z", "Undo the last annotation change", "Edit"),
@@ -45,6 +48,8 @@ SPECS = [
     ActionSpec("delete_selected", "Delete selected", "delete", "Del", "Delete the selected annotations", "Edit"),
     ActionSpec("select_all", "Select all annotations", "", "Ctrl+A", "", "Edit"),
     ActionSpec("clear_annotations", "Clear annotations…", "trash", "", "Remove every annotation", "Edit"),
+    ActionSpec("finish_polygon", "Finish polygon", "check", "", "Close the polygon being drawn (also Enter)", "Edit"),
+    ActionSpec("cancel_drawing", "Cancel drawing", "cancel", "", "Discard the shape being drawn (also Esc)", "Edit"),
     ActionSpec("customize", "Customize toolbars and shortcuts…", "settings", "", "", "Edit"),
     # Modes
     ActionSpec("mode_navigate", "Navigate", "hand", "N", "Pan by dragging, zoom with the wheel", "Mode", True, "mode"),
@@ -58,11 +63,25 @@ SPECS = [
     ActionSpec("zoom_out", "Zoom out", "zoom-out", "Ctrl+-", "", "View"),
     ActionSpec("zoom_fit", "Fit to window", "zoom-fit", "Ctrl+0", "", "View"),
     ActionSpec("zoom_actual", "Actual pixels", "zoom-actual", "Ctrl+1", "One image pixel per screen pixel", "View"),
-    ActionSpec("prev_band", "Previous band", "prev", "[", "", "View"),
-    ActionSpec("next_band", "Next band", "next", "]", "", "View"),
-    ActionSpec("true_colour", "True colour", "palette", "", "RGB from 620–670, 530–570 and 450–490 nm", "View"),
-    ActionSpec("reverse_rgb", "Reverse reference RGB", "swap", "", "Swap red and blue of the reference image", "View"),
-    ActionSpec("reset_contrast", "Reset contrast", "contrast", "", "", "View"),
+    ActionSpec("prev_band", "Previous band", "prev", "[", "", "Display"),
+    ActionSpec("next_band", "Next band", "next", "]", "", "Display"),
+    ActionSpec("true_colour", "True colour", "palette", "", "RGB from 620–670, 530–570 and 450–490 nm", "Display"),
+    ActionSpec("reverse_rgb", "Reverse reference RGB", "swap", "", "Swap red and blue of the reference image", "Reference"),
+    ActionSpec("show_rgb", "RGB from bands…", "rgb", "", "Build red, green and blue from band ranges", "Display"),
+    ActionSpec("reset_contrast", "Reset contrast", "contrast", "", "", "Display"),
+    ActionSpec("contrast_up", "Increase contrast", "contrast-up", "", "", "Display"),
+    ActionSpec("contrast_down", "Decrease contrast", "contrast-down", "", "", "Display"),
+    ActionSpec("bias_up", "Brighter (bias +)", "bias-up", "", "", "Display"),
+    ActionSpec("bias_down", "Darker (bias −)", "bias-down", "", "", "Display"),
+    ActionSpec("scaling_global", "Shared min–max", "", "", "Scale all channels by the same range", "Display", True, "scaling"),
+    ActionSpec("scaling_channel", "Per-channel min–max", "", "", "Scale each channel by its own range", "Display", True, "scaling"),
+    ActionSpec("scaling_percentile", "Per-channel 2–98 %", "", "", "Clip each channel to its 2–98 % range", "Display", True, "scaling"),
+    ActionSpec("ref_route_none", "Hide reference", "", "", "Do not use the reference image", "Reference", True, "ref_route"),
+    ActionSpec("ref_route_show", "Show reference", "image", "", "Replace the band display with the reference image",
+               "Reference", True, "ref_route"),
+    ActionSpec("ref_route_overlay", "Overlay reference", "", "", "Blend the reference image over the bands",
+               "Reference", True, "ref_route"),
+    ActionSpec("ref_opacity", "Reference opacity…", "", "", "How strongly the overlaid reference covers the bands", "Reference"),
     ActionSpec("toggle_display", "Display panel", "sliders", "", "", "View", True),
     ActionSpec("toggle_spectra", "Spectra panel", "spectrum", "", "", "View", True),
     ActionSpec("toggle_overlays", "Overlays panel", "eye", "", "", "View", True),
@@ -72,8 +91,36 @@ SPECS = [
     ActionSpec("plot_separate", "One window per class", "windows", "",
                "Plot each annotation class in its own window instead of one window of subplots", "Plot", True),
     ActionSpec("close_plots", "Close plot windows", "close-windows", "", "", "Plot"),
+    ActionSpec("spectra_cursor", "Show cursor spectrum", "", "", "Show the spectrum of the pixel under the mouse", "Plot", True),
+    ActionSpec("spectra_std", "Shade ±1σ", "", "", "Shade one standard deviation around region means", "Plot", True),
+    ActionSpec("spectra_by_class", "Spectra by class", "", "",
+               "One mean spectrum per annotation class instead of one line per annotation", "Plot", True),
+    ActionSpec("spectra_labels", "Overlay class spectra", "", "",
+               "Mean spectrum of each class in the selected segmentation overlay", "Plot", True),
+    # Overlays
+    ActionSpec("remove_overlay", "Remove selected overlay", "", "", "", "Overlays"),
+    ActionSpec("clear_overlays", "Remove all overlays", "", "", "", "Overlays"),
+    ActionSpec("show_overlays", "Show all overlays", "eye", "", "", "Overlays"),
+    ActionSpec("hide_overlays", "Hide all overlays", "", "", "", "Overlays"),
+    ActionSpec("overlay_opacity", "Selected overlay opacity…", "", "", "", "Overlays"),
+    # Analysis (the analyses themselves are added from gui.analysis.ANALYSES)
+    ActionSpec("analysis_undo", "Undo last analysis", "undo", "", "Go back to the cube before the last analysis", "Analysis"),
+    ActionSpec("analysis_restore", "Restore original cube", "restore", "", "Discard every analysis applied to the cube",
+               "Analysis"),
     # Help
     ActionSpec("about", "About hsview", "info", "", "", "Help"),
+] + [
+    ActionSpec(a.id, a.text, a.icon, "", a.tip, "Analysis") for a in ANALYSES
+] + [
+    ActionSpec(spec_id, text, icon_name, "", tip, f"Channel {c + 1}", checkable, group)
+    for c in range(3)
+    for spec_id, text, icon_name, tip, checkable, group in [
+        (f"ch{c}_band", "Set band…", "", "Show a single band (optionally averaged over a window)", False, ""),
+        (f"ch{c}_width", "Band window width…", "", "Average this many bands centred on the selected band", False, ""),
+        (f"ch{c}_sum", "Band sum or mean…", "", "Combine bands such as 10-20, 35 or 650-700nm", False, ""),
+        (f"ch{c}_filter", "Load filter…", "filter", "Show this channel through a spectral filter", False, ""),
+    ] + [(f"ch{c}_route_{r.lower()}", f"→ {r}", "", f"Send channel {c + 1} to {r.lower()}", True, f"ch{c}_route")
+         for r in ("None", "Red", "Green", "Blue", "Gray")]
 ] + [
     ActionSpec(f"class_{i}", f"Class {i}: {name}", "", str(i + 1), f"Draw new annotations as {name}", "Class", True, "class")
     for i, name in enumerate(CLASS_NAMES)
@@ -111,6 +158,9 @@ class ActionRegistry:
             if spec.group:
                 group = self.groups.setdefault(spec.group, QActionGroup(parent))
                 group.addAction(act)
+            if spec.category.startswith("Channel "):
+                # Toolbar buttons show the icon text; say which channel they belong to.
+                act.setIconText(f"Ch{spec.category.split()[1]} {spec.text.replace('…', '')}")
             act.setObjectName(spec.id)
             self.actions[spec.id] = act
         self.load_shortcuts()

@@ -274,3 +274,67 @@ def test_spectra_outputs(tmp_path, demo):
     assert ann_io.export_spectra_csv(tmp_path / "s.csv", cube, _items()) == 3
     lines = (tmp_path / "s.csv").read_text().splitlines()
     assert len(lines) == ref.shape[2] + 1 and "Rect" in lines[0]
+
+
+def test_svd_background_matches_numpy_svd(monkeypatch):
+    from hsview.analysis import background
+    from hsview.analysis import fit_svd_background, remove_svd_background
+
+    monkeypatch.setattr(background, "CHUNK_PIXELS", 7)  # exercise the block-wise path
+    rng = np.random.default_rng(0)
+    rows, cols, bands = 9, 11, 6
+    data = rng.normal(size=(rows, cols, bands)) + np.linspace(5, 10, bands)
+    cube = Cube(data.astype(np.float32), np.linspace(400, 900, bands), "nm", name="c")
+    model = fit_svd_background(cube)
+    x = np.asarray(cube.data, dtype=np.float64).reshape(-1, bands)
+    mu = x.mean(axis=0)
+    _, s, vt = np.linalg.svd(x - mu, full_matrices=False)
+    np.testing.assert_allclose(model.mean, mu, rtol=1e-10)
+    np.testing.assert_allclose(model.singular_values, s, rtol=1e-8)
+    for i in range(bands):  # same directions up to sign
+        assert abs(abs(model.components[:, i] @ vt[i]) - 1) < 1e-8
+    k = 2
+    out = remove_svd_background(cube, k, model=model)
+    assert out.shape == cube.shape and out.data.dtype == np.float32
+    expected = (x - mu) - (x - mu) @ vt[:k].T @ vt[:k]
+    np.testing.assert_allclose(out.data.reshape(-1, bands), expected, atol=1e-5)
+    # The residual has nothing left along the background directions.
+    assert np.abs(out.data.reshape(-1, bands) @ vt[:k].T).max() < 1e-4
+    assert out.metadata["analysis"][-1]["k"] == k
+    np.testing.assert_allclose(out.metadata["analysis"][-1]["variance_removed"], (s[:k] ** 2).sum() / (s ** 2).sum())
+    with_mean = remove_svd_background(cube, k, add_mean=True, model=model)
+    np.testing.assert_allclose(with_mean.data.reshape(-1, bands), expected + mu, atol=1e-4)
+    np.testing.assert_allclose(remove_svd_background(cube, 0, model=model).data.reshape(-1, bands), x - mu, atol=1e-5)
+    with pytest.raises(ValueError):
+        remove_svd_background(cube, bands + 1, model=model)
+
+
+def test_svd_background_removes_low_rank_background():
+    from hsview.analysis import remove_svd_background
+
+    rng = np.random.default_rng(1)
+    rows, cols, bands = 30, 30, 20
+    wl = np.linspace(0, 1, bands)
+    bg_shapes = np.stack([np.exp(-((wl - 0.3) / 0.2) ** 2), np.exp(-((wl - 0.7) / 0.2) ** 2)])
+    bg = rng.uniform(5, 50, size=(rows * cols, 2)) @ bg_shapes
+    target = np.zeros(bands)
+    target[[4, 12]] = [1, -1]  # a sharp feature unlike the background
+    data = bg.copy()
+    data[:10] += 3 * target
+    cube = Cube(data.reshape(rows, cols, bands))
+    out = remove_svd_background(cube, 2).data.reshape(-1, bands)
+    # Background pixels end up near zero, the target pixels keep a feature at the target bands.
+    assert np.abs(out[10:]).max() < 0.5
+    assert out[:10, 4].mean() > 1 and out[:10, 12].mean() < -1
+
+
+def test_save_cube_round_trip(tmp_path):
+    from hsview.io import load_cube, save_cube
+
+    data = np.arange(20 * 30 * 6, dtype=np.float32).reshape(20, 30, 6)
+    ref = np.zeros((20, 30, 3), np.uint8)
+    save_cube(tmp_path / "c.pkl", Cube(data, np.arange(6) * 10.0, reference=ref))
+    back = load_cube(tmp_path / "c.pkl")
+    np.testing.assert_array_equal(back.data, data)
+    np.testing.assert_array_equal(back.wavelengths, np.arange(6) * 10.0)
+    assert back.reference.shape == ref.shape

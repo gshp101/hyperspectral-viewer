@@ -50,6 +50,16 @@ _SVG = {
     "windows": '<rect x="2" y="7" width="13" height="11" rx="1.5"/><path d="M2 10h13"/><path d="M7 7V5.5A1.5 1.5 0 0 1 8.5 4h12A1.5 1.5 0 0 1 22 5.5v9a1.5 1.5 0 0 1-1.5 1.5H15"/><path d="M15 7h7"/>',
     "close-windows": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18"/><path d="m9.5 11.5 5 5M14.5 11.5l-5 5"/>',
     "eye": '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+    "save-cube": '<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
+    "cancel": '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+    "rgb": '<circle cx="9" cy="9" r="5"/><circle cx="15" cy="9" r="5"/><circle cx="12" cy="15" r="5"/>',
+    "contrast-up": '<circle cx="10" cy="12" r="7"/><path d="M10 5a7 7 0 0 1 0 14z" fill="currentColor"/><path d="M20 4v6M17 7h6"/>',
+    "contrast-down": '<circle cx="10" cy="12" r="7"/><path d="M10 5a7 7 0 0 1 0 14z" fill="currentColor"/><path d="M17 7h6"/>',
+    "bias-up": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    "bias-down": '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>',
+    "background": '<path d="M3 3v18h18"/><path d="M6 8c3 0 4 4 7 4s4-3 7-3" opacity=".45"/><path d="M6 17c2 0 3-6 5-6s2 6 4 6 2-3 5-3"/>',
+    "restore": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
 }
 
 ICON_NAMES = tuple(sorted(_SVG))
