@@ -58,6 +58,8 @@ DEFAULT_CONFIG = {
             "zoom_in", "zoom_out", "zoom_fit", "zoom_actual", SEPARATOR,
             "prev_band", "next_band", "band_readout", SEPARATOR,
             "true_colour", "reset_contrast", SEPARATOR, "plot_points", "plot_regions", "plot_separate"]},
+        {"name": "Analysis", "visible": True, "items": [
+            "analysis_svd_background", "analysis_undo", "analysis_restore"]},
     ],
 }
 
@@ -170,6 +172,170 @@ class ToolbarManager:
             if spec["name"] == name and spec["visible"] != visible:
                 spec["visible"] = visible
                 self.save()
+
+    # ---- edits made from the Toolbars menu; each one is applied and saved at once
+    def _edit(self, fn):
+        cfg = copy.deepcopy(self.config)
+        fn(cfg)
+        self.set_config(cfg)
+
+    def item_label(self, item_id) -> str:
+        if item_id == SEPARATOR:
+            return "Separator"
+        if item_id == SPACER:
+            return "Spacer"
+        return next((t for i, t, _ in self.registry.all_items() if i == item_id), item_id).replace("…", "")
+
+    def set_item(self, bar: int, item_id: str, present: bool):
+        """Add an item to the end of a toolbar, or remove it."""
+        def fn(cfg):
+            items = cfg["toolbars"][bar]["items"]
+            if present and item_id not in items:
+                items.append(item_id)
+            elif not present:
+                items[:] = [x for x in items if x != item_id]
+        self._edit(fn)
+
+    def append_item(self, bar: int, item_id: str):
+        """Add an item (separators and spacers may repeat)."""
+        self._edit(lambda cfg: cfg["toolbars"][bar]["items"].append(item_id))
+
+    def remove_at(self, bar: int, pos: int):
+        self._edit(lambda cfg: cfg["toolbars"][bar]["items"].pop(pos))
+
+    def move_at(self, bar: int, pos: int, delta: int):
+        def fn(cfg):
+            items = cfg["toolbars"][bar]["items"]
+            new = pos + delta
+            if 0 <= new < len(items):
+                items.insert(new, items.pop(pos))
+        self._edit(fn)
+
+    def set_visible(self, bar: int, visible: bool):
+        self._edit(lambda cfg: cfg["toolbars"][bar].__setitem__("visible", visible))
+
+    def new_toolbar(self, name: str):
+        self._edit(lambda cfg: cfg["toolbars"].append({"name": name, "visible": True, "items": []}))
+
+    def rename_toolbar(self, bar: int, name: str):
+        self._edit(lambda cfg: cfg["toolbars"][bar].__setitem__("name", name))
+
+    def delete_toolbar(self, bar: int):
+        self._edit(lambda cfg: cfg["toolbars"].pop(bar))
+
+    def set_icon_size(self, size: int):
+        self._edit(lambda cfg: cfg.__setitem__("icon_size", size))
+
+    def set_style(self, style: str):
+        self._edit(lambda cfg: cfg.__setitem__("style", style))
+
+    def reset(self):
+        self.set_config(DEFAULT_CONFIG)
+
+    def fill_menu(self, menu):
+        """(Re)build the Toolbars menu: every toolbar edit is also available here."""
+        menu.clear()
+        for bar, spec in enumerate(self.config["toolbars"]):
+            self._fill_toolbar_submenu(menu.addMenu(spec["name"]), bar, spec)
+        menu.addSeparator()
+        menu.addAction("New toolbar…", self._new_toolbar_prompt)
+        sizes = menu.addMenu("Icon size")
+        for size in ICON_SIZES:
+            act = sizes.addAction(f"{size} px", lambda s=size: self.set_icon_size(s))
+            act.setCheckable(True)
+            act.setChecked(size == self.config["icon_size"])
+        styles = menu.addMenu("Button style")
+        for key, (label, _) in STYLES.items():
+            act = styles.addAction(label, lambda k=key: self.set_style(k))
+            act.setCheckable(True)
+            act.setChecked(key == self.config["style"])
+        menu.addSeparator()
+        menu.addAction("Show all toolbars", lambda: self._edit(
+            lambda cfg: [tb.__setitem__("visible", True) for tb in cfg["toolbars"]]))
+        menu.addAction("Hide all toolbars", lambda: self._edit(
+            lambda cfg: [tb.__setitem__("visible", False) for tb in cfg["toolbars"]]))
+        menu.addAction("Reset toolbars to default…", self._reset_prompt)
+        menu.addSeparator()
+        menu.addAction(self.registry["customize"])
+
+    def _fill_toolbar_submenu(self, menu, bar, spec):
+        act = menu.addAction("Show", lambda: None)
+        act.setCheckable(True)
+        act.setChecked(spec["visible"])
+        act.toggled.connect(lambda on, b=bar: self.set_visible(b, on))
+        menu.addSeparator()
+        add = menu.addMenu("Commands")
+        add.setToolTipsVisible(True)
+        categories: dict[str, list] = {}
+        for item_id, text, cat in self.registry.all_items():
+            categories.setdefault(cat, []).append((item_id, text))
+        for cat, entries in categories.items():
+            sub = add.addMenu(cat)
+            for item_id, text in entries:
+                a = sub.addAction(text.replace("…", ""))
+                item = self.registry.item(item_id)
+                if item is not None and not item.icon().isNull():
+                    a.setIcon(item.icon())
+                a.setCheckable(True)
+                a.setChecked(item_id in spec["items"])
+                a.toggled.connect(lambda on, b=bar, i=item_id: self.set_item(b, i, on))
+        menu.addAction("Add separator", lambda b=bar: self.append_item(b, SEPARATOR))
+        menu.addAction("Add spacer", lambda b=bar: self.append_item(b, SPACER))
+        order = menu.addMenu("Arrange items")
+        order.setEnabled(bool(spec["items"]))
+        n = len(spec["items"])
+        for pos, item_id in enumerate(spec["items"]):
+            sub = order.addMenu(f"{pos + 1}. {self.item_label(item_id)}")
+            item = self.registry.item(item_id)
+            if item is not None and not item.icon().isNull():
+                sub.setIcon(item.icon())
+            first = sub.addAction("Move to start", lambda b=bar, p=pos: self.move_at(b, p, -p))
+            left = sub.addAction("Move left / up", lambda b=bar, p=pos: self.move_at(b, p, -1))
+            right = sub.addAction("Move right / down", lambda b=bar, p=pos: self.move_at(b, p, 1))
+            last = sub.addAction("Move to end", lambda b=bar, p=pos, n=n: self.move_at(b, p, n - 1 - p))
+            first.setEnabled(pos > 0)
+            left.setEnabled(pos > 0)
+            right.setEnabled(pos < n - 1)
+            last.setEnabled(pos < n - 1)
+            sub.addSeparator()
+            sub.addAction("Remove", lambda b=bar, p=pos: self.remove_at(b, p))
+        menu.addSeparator()
+        menu.addAction("Rename…", lambda b=bar: self._rename_prompt(b))
+        menu.addAction("Delete toolbar…", lambda b=bar: self._delete_prompt(b))
+
+    def _taken(self, name, ignore=None):
+        return any(_object_name(t["name"]) == _object_name(name)
+                   for i, t in enumerate(self.config["toolbars"]) if i != ignore)
+
+    def _new_toolbar_prompt(self):
+        name, ok = QInputDialog.getText(self.window, "New toolbar", "Name:")
+        name = name.strip()
+        if ok and name:
+            if self._taken(name):
+                QMessageBox.warning(self.window, "New toolbar", f"There is already a toolbar called '{name}'.")
+                return
+            self.new_toolbar(name)
+
+    def _rename_prompt(self, bar):
+        old = self.config["toolbars"][bar]["name"]
+        name, ok = QInputDialog.getText(self.window, "Rename toolbar", "Name:", text=old)
+        name = name.strip()
+        if ok and name and name != old:
+            if self._taken(name, ignore=bar):
+                QMessageBox.warning(self.window, "Rename toolbar", f"There is already a toolbar called '{name}'.")
+                return
+            self.rename_toolbar(bar, name)
+
+    def _delete_prompt(self, bar):
+        name = self.config["toolbars"][bar]["name"]
+        if QMessageBox.question(self.window, "Delete toolbar",
+                                f"Delete the toolbar '{name}'?") == QMessageBox.StandardButton.Yes:
+            self.delete_toolbar(bar)
+
+    def _reset_prompt(self):
+        if QMessageBox.question(self.window, "Reset toolbars",
+                                "Replace all toolbars with the default set?") == QMessageBox.StandardButton.Yes:
+            self.reset()
 
     def customize(self):
         dlg = CustomizeDialog(self.registry, self.config, self.window)

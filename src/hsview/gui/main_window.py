@@ -10,10 +10,14 @@ from PyQt6.QtGui import QActionGroup
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
     QFileDialog,
     QInputDialog,
+    QFormLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QScrollArea,
@@ -23,9 +27,10 @@ from PyQt6.QtWidgets import (
 from .. import __version__
 from .. import annotations as ann_io
 from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
-from ..io import Cube, LoadError, cube_file_filter, load_cube, resolve_image_id
+from ..io import Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
 from .actions import ActionRegistry
-from .display_panel import DisplayPanel
+from .analysis import ANALYSES
+from .display_panel import REF_ROUTES, ROUTES, DisplayPanel
 from .app_icons import APP_ICONS, DEFAULT_APP_ICON, app_icon
 from .icons import swatch_icon
 from .image_view import ImageView
@@ -34,6 +39,33 @@ from .spectrum_panel import ClassPlotDialog, SpectrumPanel
 from .toolbar import ToolbarManager
 
 ANNOTATION_FILTER = "Annotations (*.pkl *.json);;Pickle (*.pkl);;JSON (*.json);;All files (*)"
+CONTRAST_STEP, BIAS_STEP = 5, 8
+
+
+class BandSpecDialog(QDialog):
+    """Ask for one band selection per row (e.g. '10-20, 35' or '650-700nm') and sum/mean."""
+
+    def __init__(self, title, labels, values, mode="sum", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        form = QFormLayout(self)
+        self.edits = []
+        for label, value in zip(labels, values):
+            edit = QLineEdit(value)
+            edit.setPlaceholderText("10-20, 35  or  650-700nm")
+            form.addRow(label, edit)
+            self.edits.append(edit)
+        self.mode = QComboBox()
+        self.mode.addItems(["sum", "mean"])
+        self.mode.setCurrentText(mode)
+        form.addRow("Combine by", self.mode)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def values(self):
+        return [e.text().strip() for e in self.edits]
 
 
 class ClassSelectorAction(QWidgetAction):
@@ -83,6 +115,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings if settings is not None else QSettings("hsview", "hsview")
         self.cube: Cube | None = None
+        self.cube_history: list[Cube] = []  # cubes before each analysis, oldest first
         self.annotation_path: str | None = None
         self.store = AnnotationStore()
         self.setWindowTitle("hsview")
@@ -120,6 +153,8 @@ class MainWindow(QMainWindow):
         self.view.modeChanged.connect(self._on_mode)
         self.view.scene().selectionChanged.connect(self._update_actions)
         self.overlays.changed.connect(self.spectra.overlays_changed)
+        self.overlays.changed.connect(self._update_actions)
+        self.display.reference.changed.connect(self._update_actions)
         self.store.subscribe(self._update_actions)
 
         state = self.settings.value("window/state")
@@ -178,13 +213,49 @@ class MainWindow(QMainWindow):
             "true_colour": self.display.true_colour,
             "reverse_rgb": self.display.reference.reverse_rgb,
             "reset_contrast": self.display.reset_contrast,
+            "save_cube": self.save_cube_dialog,
+            "finish_polygon": self.view.finish_polygon,
+            "cancel_drawing": self.view.cancel_drawing,
+            "show_rgb": self.show_rgb_dialog,
+            "contrast_up": lambda: self.display.step_contrast(CONTRAST_STEP),
+            "contrast_down": lambda: self.display.step_contrast(-CONTRAST_STEP),
+            "bias_up": lambda: self.display.step_bias(BIAS_STEP),
+            "bias_down": lambda: self.display.step_bias(-BIAS_STEP),
+            "ref_opacity": self.reference_opacity_dialog,
+            "remove_overlay": self.overlays.remove_current,
+            "clear_overlays": self.clear_overlays,
+            "show_overlays": lambda: self.overlays.set_all_visible(True),
+            "hide_overlays": lambda: self.overlays.set_all_visible(False),
+            "overlay_opacity": lambda: self.overlay_opacity_dialog(),
+            "analysis_undo": self.undo_analysis,
+            "analysis_restore": self.restore_original_cube,
             "plot_points": lambda: self.plot_by_class("point"),
             "plot_regions": lambda: self.plot_by_class("region"),
             "close_plots": self.close_plot_windows,
             "about": self.about,
         }
+        for c in range(len(self.display.channels)):
+            slots[f"ch{c}_band"] = lambda c=c: self.channel_band_dialog(c)
+            slots[f"ch{c}_width"] = lambda c=c: self.channel_width_dialog(c)
+            slots[f"ch{c}_sum"] = lambda c=c: self.channel_sum_dialog(c)
+            slots[f"ch{c}_filter"] = lambda c=c: self.display.channels[c].load_filter_dialog()
+        for cmd in ANALYSES:
+            slots[cmd.id] = lambda cmd=cmd: self.run_analysis(cmd)
         for action_id, slot in slots.items():
             r.connect(action_id, lambda *_, f=slot: f())
+        # Menu items that mirror combo boxes and check boxes in the panels stay in sync both ways.
+        for c, ch in enumerate(self.display.channels):
+            self._bind_combo(ch.route, [f"ch{c}_route_{x.lower()}" for x in ROUTES])
+        self._bind_combo(self.display.reference.route, [f"ref_route_{x.lower()}" for x in REF_ROUTES])
+        self._bind_combo(self.display.scaling, [f"scaling_{self.display.scaling.itemData(i)}"
+                                                for i in range(self.display.scaling.count())])
+        for action_id, box in (("spectra_cursor", self.spectra.follow_cursor), ("spectra_std", self.spectra.show_std),
+                               ("spectra_by_class", self.spectra.by_class),
+                               ("spectra_labels", self.spectra.show_labels)):
+            act = r[action_id]
+            act.setChecked(box.isChecked())
+            act.toggled.connect(box.setChecked)
+            box.toggled.connect(act.setChecked)
         for mode in ("navigate", "select", "point", "rect", "polygon"):
             r[f"mode_{mode}"].triggered.connect(lambda _, m=mode: self.view.set_mode(m))
         for i in range(len(CLASS_NAMES)):
@@ -197,34 +268,68 @@ class MainWindow(QMainWindow):
             dock.visibilityChanged.connect(lambda vis, a=act: (a.blockSignals(True), a.setChecked(vis),
                                                                 a.blockSignals(False)))
 
-    def _build_menus(self):
-        r = self.registry
-        mb = self.menuBar()
-        menus = {
+    def _bind_combo(self, combo, action_ids):
+        """Radio menu items that choose a combo box entry and follow it when it changes."""
+        acts = [self.registry[a] for a in action_ids]
+        for i, act in enumerate(acts):
+            act.triggered.connect(lambda _, i=i: combo.setCurrentIndex(i))
+        sync = lambda i: 0 <= i < len(acts) and acts[i].setChecked(True)  # noqa: E731
+        combo.currentIndexChanged.connect(sync)
+        sync(combo.currentIndex())
+
+    # Menu layout: lists of action ids, None for a separator, (title, [...]) for a submenu.
+    def _menu_layout(self):
+        channels = [(f"Band channel {c + 1}", [f"ch{c}_band", f"ch{c}_width", f"ch{c}_sum", f"ch{c}_filter", None]
+                     + [f"ch{c}_route_{x.lower()}" for x in ROUTES]) for c in range(len(self.display.channels))]
+        return {
             "&File": ["open_cube", "open_by_id", "open_reference", "add_overlay", "load_filter", None,
                       "load_annotations", "save_annotations", "save_annotations_as", None,
-                      "save_spectra", "export_csv", None, "quit"],
-            "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None, "customize"],
+                      "save_spectra", "export_csv", "save_cube", None, "quit"],
+            "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None,
+                      "finish_polygon", "cancel_drawing", None, "customize"],
             "&Mode": ["mode_navigate", "mode_select", "mode_point", "mode_rect", "mode_polygon"],
             "&Class": [f"class_{i}" for i in range(len(CLASS_NAMES))],
-            "&View": ["zoom_in", "zoom_out", "zoom_fit", "zoom_actual", None, "prev_band", "next_band",
-                      "true_colour", "reverse_rgb", "reset_contrast", None,
+            "&View": ["zoom_in", "zoom_out", "zoom_fit", "zoom_actual", None,
                       "toggle_display", "toggle_overlays", "toggle_spectra"],
-            "&Plot": ["plot_points", "plot_regions", None, "plot_separate", "close_plots"],
+            "&Display": ["prev_band", "next_band", "true_colour", "show_rgb", None, *channels,
+                         ("Reference image", ["open_reference", "reverse_rgb", "ref_opacity", None,
+                                              "ref_route_none", "ref_route_show", "ref_route_overlay"]),
+                         None, ("Scaling", ["scaling_global", "scaling_channel", "scaling_percentile"]),
+                         ("Contrast", ["contrast_up", "contrast_down", "bias_up", "bias_down", None,
+                                       "reset_contrast"])],
+            "&Overlays": ["add_overlay", "remove_overlay", "clear_overlays", None, "show_overlays", "hide_overlays",
+                          "overlay_opacity"],
+            "&Plot": ["plot_points", "plot_regions", None, "plot_separate", "close_plots", None,
+                      "spectra_cursor", "spectra_std", "spectra_by_class", "spectra_labels"],
+            "&Analysis": [cmd.id for cmd in ANALYSES] + [None, "analysis_undo", "analysis_restore"],
+            "&Toolbars": [],
             "&Help": ["about"],
         }
-        for title, ids in menus.items():
-            menu = mb.addMenu(title)
-            for action_id in ids:
-                if action_id is None:
-                    menu.addSeparator()
-                else:
-                    menu.addAction(r[action_id])
-            if title == "&View":
+
+    def _add_menu_items(self, menu, ids):
+        for entry in ids:
+            if entry is None:
                 menu.addSeparator()
-                self.toolbar_menu = menu.addMenu("Toolbars")
-                self.toolbar_menu.aboutToShow.connect(self._fill_toolbar_menu)
-                self._build_app_icon_menu(menu.addMenu("Application icon"))
+            elif isinstance(entry, tuple):
+                self._add_menu_items(menu.addMenu(entry[0]), entry[1])
+            else:
+                menu.addAction(self.registry[entry])
+
+    def _build_menus(self):
+        mb = self.menuBar()
+        self.menus = {}
+        for title, ids in self._menu_layout().items():
+            menu = mb.addMenu(title)
+            menu.setToolTipsVisible(True)
+            self.menus[title.replace("&", "")] = menu
+            self._add_menu_items(menu, ids)
+        view = self.menus["View"]
+        view.addSeparator()
+        self._build_app_icon_menu(view.addMenu("Application icon"))
+        self.overlay_list_menu = None
+        self.menus["Overlays"].aboutToShow.connect(self._fill_overlay_menu)
+        self.toolbar_menu = self.menus["Toolbars"]
+        self.toolbar_menu.aboutToShow.connect(self._fill_toolbar_menu)
 
     def _build_app_icon_menu(self, menu):
         group = QActionGroup(self)
@@ -249,11 +354,31 @@ class MainWindow(QMainWindow):
         self.settings.setValue("app/icon", key)
 
     def _fill_toolbar_menu(self):
-        self.toolbar_menu.clear()
-        for tb in self.toolbars.toolbars:
-            self.toolbar_menu.addAction(tb.toggleViewAction())
-        self.toolbar_menu.addSeparator()
-        self.toolbar_menu.addAction(self.registry["customize"])
+        self.toolbars.fill_menu(self.toolbar_menu)
+
+    def _fill_overlay_menu(self):
+        """One submenu per overlay (visibility, opacity, selection, removal) after the fixed items."""
+        menu = self.menus["Overlays"]
+        for act in getattr(self, "_overlay_entries", []):
+            menu.removeAction(act)
+        self._overlay_entries = [menu.addSeparator()]
+        current = self.overlays.current()
+        for key, ov in self.overlays.overlays.items():
+            sub = menu.addMenu(ov.name + ("  (selected)" if ov is current else ""))
+            vis = sub.addAction("Visible")
+            vis.setCheckable(True)
+            vis.setChecked(ov.visible)
+            vis.toggled.connect(lambda on, k=key: self.overlays.set_visible(k, on))
+            sub.addAction("Select", lambda k=key: self.overlays.select(k))
+            sub.addAction("Opacity…", lambda k=key: self.overlay_opacity_dialog(k))
+            sub.addSeparator()
+            sub.addAction("Remove", lambda k=key: self.overlays.remove(k))
+            self._overlay_entries.append(sub.menuAction())
+        has = bool(self.overlays.overlays)
+        for action_id in ("clear_overlays", "show_overlays", "hide_overlays"):
+            self.registry[action_id].setEnabled(has)
+        self.registry["remove_overlay"].setEnabled(current is not None)
+        self.registry["overlay_opacity"].setEnabled(current is not None)
 
     def createPopupMenu(self):
         menu = super().createPopupMenu()
@@ -273,8 +398,25 @@ class MainWindow(QMainWindow):
                           "zoom_in", "zoom_out", "zoom_fit", "zoom_actual", "prev_band", "next_band",
                           "reset_contrast", "clear_annotations", "select_all"):
             r[action_id].setEnabled(has_cube)
+        for spec in r.specs.values():
+            if spec.category.startswith("Channel ") or spec.category == "Analysis" or spec.id in (
+                    "save_cube", "show_rgb", "contrast_up", "contrast_down", "bias_up", "bias_down"):
+                r[spec.id].setEnabled(has_cube)
+        r["analysis_undo"].setEnabled(bool(self.cube_history))
+        r["analysis_restore"].setEnabled(bool(self.cube_history))
         r["true_colour"].setEnabled(has_cube and self.cube.wavelengths is not None)
-        r["reverse_rgb"].setEnabled(self.display.reference.img is not None and self.display.reference.img.ndim == 3)
+        has_ref = self.display.reference.img is not None
+        r["reverse_rgb"].setEnabled(has_ref and self.display.reference.img.ndim == 3)
+        for action_id in ("ref_route_show", "ref_route_overlay", "ref_opacity"):
+            r[action_id].setEnabled(has_ref)
+        cur = self.overlays.current()
+        r["remove_overlay"].setEnabled(cur is not None)
+        r["overlay_opacity"].setEnabled(cur is not None)
+        has_ov = bool(self.overlays.overlays)
+        for action_id in ("clear_overlays", "show_overlays", "hide_overlays"):
+            r[action_id].setEnabled(has_ov)
+        r["finish_polygon"].setEnabled(self.view.mode == "polygon")
+        r["cancel_drawing"].setEnabled(self.view.mode in ("polygon", "rect"))
         r["undo"].setEnabled(self.store.can_undo)
         r["redo"].setEnabled(self.store.can_redo)
         try:
@@ -311,6 +453,7 @@ class MainWindow(QMainWindow):
         act = self.registry[f"mode_{mode}"]
         if not act.isChecked():
             act.setChecked(True)
+        self._update_actions()
 
     def set_class(self, cls: int):
         cls = int(cls)
@@ -369,6 +512,7 @@ class MainWindow(QMainWindow):
 
     def set_cube(self, cube: Cube):
         self.cube = cube
+        self.cube_history.clear()
         self.annotation_path = None
         self.store.replace([], undoable=False)
         self.store._undo.clear()
@@ -380,6 +524,109 @@ class MainWindow(QMainWindow):
             if key in cube.metadata:
                 self.statusBar().showMessage(cube.metadata[key], 8000)
         self._update_actions()
+
+    def save_cube_dialog(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save cube", str(Path(self._last_dir()) / f"{self.cube.name}.pkl"),
+                                              "Pickle (*.pkl)")
+        if path:
+            try:
+                save_cube(path, self.cube)
+            except OSError as exc:
+                QMessageBox.warning(self, "Could not save cube", str(exc))
+                return
+            self._remember(path)
+            self.statusBar().showMessage(f"Saved cube to {path}", 5000)
+
+    # ----------------------------------------------------------- analysis
+    def replace_cube(self, cube: Cube):
+        """Show a processed cube of the same size, keeping annotations, overlays and display settings."""
+        if cube.shape[:2] != self.cube.shape[:2] or cube.n_bands != self.cube.n_bands:
+            raise ValueError("A replacement cube must have the same shape.")
+        self.cube = cube
+        self.display.replace_cube(cube)
+        self.spectra.set_cube(cube)
+        self._update_actions()
+
+    def run_analysis(self, cmd):
+        if self.cube is None:
+            return None
+        try:
+            result = cmd.run(self)
+        except Exception as exc:  # show numerical failures instead of crashing
+            QMessageBox.warning(self, cmd.text.replace("…", ""), str(exc))
+            return None
+        if result is None:
+            return None
+        self.cube_history.append(self.cube)
+        self.replace_cube(result)
+        self.statusBar().showMessage(f"{cmd.text.replace('…', '')}: showing {result.name}", 8000)
+        return result
+
+    def undo_analysis(self):
+        if self.cube_history:
+            self.replace_cube(self.cube_history.pop())
+
+    def restore_original_cube(self):
+        if self.cube_history:
+            original = self.cube_history[0]
+            self.cube_history.clear()
+            self.replace_cube(original)
+
+    # ------------------------------------------------------------ display
+    def channel_band_dialog(self, c: int):
+        ch = self.display.channels[c]
+        n = self.cube.n_bands
+        b, ok = QInputDialog.getInt(self, f"Band channel {c + 1}", f"Band (0–{n - 1}):", ch.spin.value(), 0, n - 1)
+        if ok:
+            ch.set_band(b)
+            if not ch.route.currentIndex():
+                ch.route.setCurrentText("Gray")
+
+    def channel_width_dialog(self, c: int):
+        ch = self.display.channels[c]
+        n = self.cube.n_bands
+        w, ok = QInputDialog.getInt(self, f"Band channel {c + 1}", "Average this many bands:",
+                                    ch.width_spin.value(), 1, n)
+        if ok:
+            ch.set_width(w)
+
+    def channel_sum_dialog(self, c: int):
+        ch = self.display.channels[c]
+        dlg = BandSpecDialog(f"Band channel {c + 1}", ["Bands"], [ch.spec.text()], ch.sum_mode.currentText(), self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.values()[0]:
+            ch.set_spec(dlg.values()[0], dlg.mode.currentText())
+            if not ch.route.currentIndex():
+                ch.route.setCurrentText("Gray")
+
+    def show_rgb_dialog(self):
+        chans = self.display.channels
+        defaults = [ch.spec.text() for ch in chans]
+        if not any(defaults) and self.cube.wavelengths is not None:
+            defaults = ["620-670nm", "530-570nm", "450-490nm"]
+        dlg = BandSpecDialog("RGB from bands", ["Red", "Green", "Blue"], defaults, chans[0].sum_mode.currentText(), self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.display.show_rgb(dlg.values(), dlg.mode.currentText())
+
+    def reference_opacity_dialog(self):
+        ref = self.display.reference
+        v, ok = QInputDialog.getInt(self, "Reference image", "Opacity (%):", ref.opacity.value(), 0, 100)
+        if ok:
+            ref.opacity.setValue(v)
+            if ref.route.currentText() == "None":
+                ref.route.setCurrentText("Overlay")
+
+    def overlay_opacity_dialog(self, key: str | None = None):
+        ov = self.overlays.overlays.get(key) if key else self.overlays.current()
+        if ov is None:
+            return
+        v, ok = QInputDialog.getInt(self, ov.name, "Opacity (%):", int(round(ov.opacity * 100)), 0, 100)
+        if ok:
+            self.overlays.set_opacity(ov.key, v / 100)
+
+    def clear_overlays(self):
+        if self.overlays.overlays and QMessageBox.question(
+                self, "Remove overlays", "Remove all overlays?") == QMessageBox.StandardButton.Yes:
+            self.overlays.clear()
 
     # -------------------------------------------------------- annotations
     def confirm_discard_annotations(self) -> bool:
@@ -490,7 +737,8 @@ class MainWindow(QMainWindow):
     def about(self):
         QMessageBox.about(self, "About hsview",
                           f"<b>hsview {__version__}</b><br>View and annotate hyperspectral cubes.<br><br>"
-                          "Right-click a toolbar to customize it.")
+                          "Every command is in the menus. Use the Toolbars menu (or right-click a toolbar) to "
+                          "change the toolbars.")
 
     def closeEvent(self, event):
         if not self.confirm_discard_annotations():

@@ -193,7 +193,7 @@ def test_toolbar_config_persists_and_validates(win):
     saved = json.loads(win.settings.value("toolbars/config"))
     assert saved["toolbars"][1]["name"] == "Mine 2" and saved["toolbars"][1]["visible"] is False
     tm.set_config(DEFAULT_CONFIG)
-    assert len(tm.toolbars) == 3
+    assert len(tm.toolbars) == len(DEFAULT_CONFIG["toolbars"])
 
 
 def test_customize_dialog_edits(win, qtbot):
@@ -298,3 +298,144 @@ def test_reference_overlay_blends_over_bands(win):
     assert ref.route.currentText() == "Overlay"
     ref.route.setCurrentText("Show")
     assert all(c.route.currentText() == "None" for c in d.channels)
+
+
+def _menu_action_ids(menu, out):
+    for act in menu.actions():
+        if act.menu() is not None:
+            _menu_action_ids(act.menu(), out)
+        elif act.objectName():
+            out.add(act.objectName())
+    return out
+
+
+def test_every_command_is_in_a_menu(win):
+    found = set()
+    for act in win.menuBar().actions():
+        _menu_action_ids(act.menu(), found)
+    missing = set(win.registry.actions) - found
+    assert not missing, missing
+
+
+def test_channel_route_and_panel_checkboxes_follow_menus(win):
+    r = win.registry
+    ch = win.display.channels[1]
+    r["ch1_route_red"].trigger()
+    assert ch.route.currentText() == "Red"
+    ch.route.setCurrentText("Blue")
+    assert r["ch1_route_blue"].isChecked()
+    r["scaling_percentile"].trigger()
+    assert win.display.scaling.currentData() == "percentile"
+    r["ref_route_show"].trigger()
+    assert win.display.reference.route.currentText() == "Show"
+    assert r["spectra_cursor"].isChecked()
+    r["spectra_cursor"].setChecked(False)
+    assert not win.spectra.follow_cursor.isChecked()
+    win.spectra.by_class.setChecked(True)
+    assert r["spectra_by_class"].isChecked()
+    before = win.display.contrast.value()
+    r["contrast_up"].trigger()
+    assert win.display.contrast.value() > before
+
+
+def test_overlay_menu(win):
+    win.overlays.add_array(win.labels, "seg")
+    menu = win.menus["Overlays"]
+    menu.aboutToShow.emit()
+    sub = next(a.menu() for a in menu.actions() if a.menu() is not None and a.text().startswith("seg"))
+    vis = next(a for a in sub.actions() if a.text() == "Visible")
+    vis.setChecked(False)
+    ov = next(iter(win.overlays.overlays.values()))
+    assert not ov.visible
+    win.overlays.set_opacity(ov.key, 0.2)
+    assert ov.opacity == pytest.approx(0.2)
+    win.registry["show_overlays"].trigger()
+    assert ov.visible
+
+
+def test_toolbars_editable_from_menu(win):
+    tm = win.toolbars
+    win.toolbar_menu.aboutToShow.emit()  # builds without errors
+    assert win.toolbar_menu.actions()
+    tm.new_toolbar("Mine")
+    bar = len(tm.config["toolbars"]) - 1
+    tm.set_item(bar, "zoom_in", True)
+    tm.set_item(bar, "analysis_svd_background", True)
+    tm.append_item(bar, "|")
+    tm.set_item(bar, "undo", True)
+    tm.move_at(bar, 3, -3)
+    assert tm.config["toolbars"][bar]["items"] == ["undo", "zoom_in", "analysis_svd_background", "|"]
+    tm.remove_at(bar, 3)
+    tm.set_item(bar, "zoom_in", False)
+    tm.rename_toolbar(bar, "Renamed")
+    tm.set_visible(bar, False)
+    tm.set_icon_size(32)
+    tm.set_style("beside")
+    saved = json.loads(win.settings.value("toolbars/config"))
+    assert saved["toolbars"][bar] == {"name": "Renamed", "visible": False,
+                                      "items": ["undo", "analysis_svd_background"]}
+    assert saved["icon_size"] == 32 and saved["style"] == "beside"
+    assert not tm.toolbars[bar].isVisible()
+    # Checking a command in the menu puts it on the toolbar.
+    win.toolbar_menu.aboutToShow.emit()
+    sub = next(a.menu() for a in win.toolbar_menu.actions() if a.text() == "Renamed")
+    commands = next(a.menu() for a in sub.actions() if a.text() == "Commands")
+    view = next(a.menu() for a in commands.actions() if a.text() == "View")
+    next(a for a in view.actions() if a.text() == "Zoom in").setChecked(True)
+    assert tm.config["toolbars"][bar]["items"][-1] == "zoom_in"
+    tm.delete_toolbar(bar)
+    assert "Renamed" not in [tb.windowTitle() for tb in tm.toolbars]
+
+
+def test_svd_background_analysis(win, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from hsview.gui import analysis
+
+    win.store.add("point", 0, [[10, 10]])
+    original = win.cube
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["max_k"] = dlg.k.maximum()
+        dlg.k.setValue(3)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(analysis.SVDBackgroundDialog, "exec", fake_exec)
+    win.registry["analysis_svd_background"].trigger()
+    assert win.cube is not original and win.cube.shape == original.shape
+    assert seen["max_k"] == original.n_bands - 1
+    assert win.cube.metadata["analysis"][-1]["k"] == 3
+    np.testing.assert_allclose(np.asarray(win.cube.data).reshape(-1, original.n_bands).mean(axis=0), 0, atol=1e-3)
+    assert len(win.store) == 1  # annotations survive
+    assert win.registry["analysis_undo"].isEnabled()
+    assert win.settings.value("analysis/svd_k", type=int) == 3
+    win.registry["analysis_svd_background"].trigger()
+    assert len(win.cube_history) == 2
+    win.registry["analysis_undo"].trigger()
+    assert len(win.cube_history) == 1
+    win.registry["analysis_restore"].trigger()
+    assert win.cube is original and not win.registry["analysis_undo"].isEnabled()
+
+
+def test_svd_background_cancel_keeps_cube(win, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from hsview.gui import analysis
+
+    monkeypatch.setattr(analysis.SVDBackgroundDialog, "exec", lambda dlg: QDialog.DialogCode.Rejected)
+    original = win.cube
+    win.registry["analysis_svd_background"].trigger()
+    assert win.cube is original and not win.cube_history
+
+
+def test_svd_dialog_summary(qapp):
+    from hsview.analysis import SVDBackground
+    from hsview.gui.analysis import SVDBackgroundDialog
+
+    model = SVDBackground(np.zeros(4), np.array([3.0, 2.0, 1.0, 0.0]), np.eye(4))
+    dlg = SVDBackgroundDialog(model, k=1)
+    assert "64.29 %" in dlg.summary.text()
+    dlg.k.setValue(2)
+    assert "92.86 %" in dlg.summary.text()
+    dlg.deleteLater()

@@ -188,6 +188,41 @@ class OverlayPanel(QWidget):
         self._sync_buttons()
         self.changed.emit()
 
+    def _item(self, key):
+        for i in range(self.list.count()):
+            if self.list.item(i).data(Qt.ItemDataRole.UserRole) == key:
+                return self.list.item(i)
+        return None
+
+    def select(self, key):
+        item = self._item(key)
+        if item is not None:
+            self.list.setCurrentItem(item)
+
+    def remove(self, key):
+        self.select(key)
+        self.remove_current()
+
+    def set_visible(self, key, visible: bool):
+        item = self._item(key)
+        if item is not None:  # goes through _on_item_changed like a click on the check box
+            item.setCheckState(Qt.CheckState.Checked if visible else Qt.CheckState.Unchecked)
+
+    def set_all_visible(self, visible: bool):
+        for key in list(self.overlays):
+            self.set_visible(key, visible)
+
+    def set_opacity(self, key, opacity: float):
+        ov = self.overlays.get(key)
+        if ov is None:
+            return
+        ov.opacity = max(0.0, min(1.0, opacity))
+        self.view.set_overlay_opacity(key, ov.opacity)
+        if self.current() is ov:
+            self.opacity.blockSignals(True)
+            self.opacity.setValue(int(round(ov.opacity * 100)))
+            self.opacity.blockSignals(False)
+
     def _on_item_changed(self, item):
         ov = self.overlays.get(item.data(Qt.ItemDataRole.UserRole))
         if ov is not None:
