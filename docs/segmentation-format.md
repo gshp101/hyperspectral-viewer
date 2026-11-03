@@ -24,7 +24,7 @@ Two containers hold the same content. Pick by the file suffix:
 | `wavelengths` | `float (bands,)` or `None` | Missing from `.npz` when the cube had none. |
 | `method` | `str` | `kmeans`, `nearest_mean`, `lda` or `knn`. |
 | `supervised` | `bool` | |
-| `params` | `dict` | Every option used (number of regions, principal components, brightness normalisation, smoothing, seed; for supervised runs also the training pixel count per class). |
+| `params` | `dict` | Every option used (number of regions, principal components, `intensity` (`use`, `ignore` or `ignore_offset`), smoothing, seed; for supervised runs also the training pixel count per class). |
 | `cube` | `dict` | `name`, `path`, `shape` and `processing`, the analyses applied to the cube before segmenting (for example SVD background removal with its `k`). |
 | `created` | `str` | UTC time, ISO 8601. |
 | `class_names` | `list[str]` | The 7 annotation class names; annotation `class` indexes this list. |

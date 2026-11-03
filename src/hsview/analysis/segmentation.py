@@ -1,8 +1,12 @@
 """Segment a cube into regions, without or with training annotations.
 
-Every pixel spectrum is first turned into a feature vector: optionally scaled
-to unit length (so regions that differ only in brightness look the same,
-which makes Euclidean distance behave like the spectral angle), then
+Every pixel spectrum is first turned into a feature vector. With
+``intensity="ignore"`` each spectrum is scaled to unit length, so only its
+shape matters: a pixel and the same pixel at any brightness land in the same
+class, and Euclidean distance between features is a monotonic function of the
+spectral angle. ``intensity="ignore_offset"`` also subtracts each spectrum's
+own mean first, so a constant offset (stray light, dark level) is ignored too;
+distances then follow the correlation between spectra. The features are then
 optionally projected onto the first principal components of the cube.
 
 * :func:`segment_unsupervised` clusters the features with k-means.
@@ -31,6 +35,11 @@ from ..io import Cube, LoadError
 from ..processing import polygon_mask
 from .background import _blocks
 
+INTENSITY_MODES = {
+    "use": "Use intensity",
+    "ignore": "Ignore intensity (spectral shape, angle)",
+    "ignore_offset": "Ignore intensity and offset (correlation)",
+}
 FORMAT = "hsview-segmentation"
 FORMAT_VERSION = 1
 SUPERVISED_METHODS = {
@@ -69,15 +78,21 @@ class Segmentation:
 # ---------------------------------------------------------------- features
 @dataclass
 class FeatureTransform:
-    """Spectrum -> feature vector: optional unit-length scaling, then optional PCA."""
+    """Spectrum -> feature vector: optional removal of intensity (see ``INTENSITY_MODES``), then optional PCA."""
 
-    normalize: bool = False
+    intensity: str = "use"
     mean: np.ndarray | None = None  # (bands,), used with basis
     basis: np.ndarray | None = None  # (bands, d)
 
+    def __post_init__(self):
+        if self.intensity not in INTENSITY_MODES:
+            raise ValueError(f"intensity must be one of {', '.join(INTENSITY_MODES)}")
+
     def __call__(self, x: np.ndarray) -> np.ndarray:
         x = np.asarray(x, dtype=np.float64)
-        if self.normalize:
+        if self.intensity == "ignore_offset":
+            x = x - x.mean(axis=-1, keepdims=True)
+        if self.intensity != "use":
             norm = np.linalg.norm(x, axis=-1, keepdims=True)
             x = x / np.where(norm > 0, norm, 1)
         if self.basis is not None:
@@ -95,9 +110,9 @@ def _sample_pixels(cube: Cube, n: int, rng) -> np.ndarray:
     return np.asarray(cube.data[r, c, :], dtype=np.float64)
 
 
-def fit_features(cube: Cube, normalize: bool = False, n_components: int = 0, seed: int = 0) -> FeatureTransform:
+def fit_features(cube: Cube, intensity: str = "use", n_components: int = 0, seed: int = 0) -> FeatureTransform:
     """Fit the feature transform; ``n_components`` 0 keeps every band."""
-    t = FeatureTransform(normalize)
+    t = FeatureTransform(intensity)
     n_components = int(n_components)
     if 0 < n_components < cube.n_bands:
         x = t(_sample_pixels(cube, PCA_SAMPLE, np.random.default_rng(seed))).astype(np.float64)
@@ -273,10 +288,13 @@ def kmeans(x: np.ndarray, k: int, max_iter: int = 50, tol: float = 1e-4, seed: i
     return centres, labels
 
 
-def segment_unsupervised(cube: Cube, n_clusters: int = 6, n_components: int = 10, normalize: bool = False,
+def segment_unsupervised(cube: Cube, n_clusters: int = 6, n_components: int = 10, intensity: str = "use",
                          max_iter: int = 50, smooth: int = 0, seed: int = 0) -> Segmentation:
-    """k-means clustering of the pixel spectra. Labels are 1..n_clusters, largest cluster first."""
-    transform = fit_features(cube, normalize, n_components, seed)
+    """k-means clustering of the pixel spectra. Labels are 1..n_clusters, largest cluster first.
+
+    ``intensity`` is ``"use"``, ``"ignore"`` or ``"ignore_offset"`` (see ``INTENSITY_MODES``).
+    """
+    transform = fit_features(cube, intensity, n_components, seed)
     x = cube_features(cube, transform)
     _, idx = kmeans(x, int(n_clusters), max_iter=max_iter, seed=seed)
     k = int(n_clusters)
@@ -285,7 +303,7 @@ def segment_unsupervised(cube: Cube, n_clusters: int = 6, n_components: int = 10
     relabel[order] = np.arange(1, k + 1)
     labels = relabel[idx].reshape(cube.shape[:2])
     seg = Segmentation(labels, "kmeans", False, {i: f"Cluster {i}" for i in range(1, k + 1)}, cluster_colors(k),
-                       params={"n_clusters": k, "n_components": int(n_components), "normalize": bool(normalize),
+                       params={"n_clusters": k, "n_components": int(n_components), "intensity": intensity,
                                "max_iter": int(max_iter), "smooth": int(smooth), "seed": int(seed)})
     return _finish(seg, cube, smooth)
 
@@ -305,13 +323,16 @@ def _lda(train_x, train_y, classes, shrinkage=0.1):
 
 
 def segment_supervised(cube: Cube, annotations, method: str = "nearest_mean", n_components: int = 10,
-                       normalize: bool = False, k_neighbors: int = 5, max_per_class: int = 500,
+                       intensity: str = "use", k_neighbors: int = 5, max_per_class: int = 500,
                        smooth: int = 0, seed: int = 0) -> Segmentation:
     """Classify every pixel from the pixels under the annotations.
 
     ``method`` is ``"nearest_mean"``, ``"lda"`` or ``"knn"``. Label values are
     annotation class + 1. Regions contribute every pixel inside them; at most
-    ``max_per_class`` training pixels per class are used by k-NN.
+    ``max_per_class`` training pixels per class are used by k-NN. ``intensity``
+    is ``"use"``, ``"ignore"`` or ``"ignore_offset"`` (see ``INTENSITY_MODES``):
+    with either ignore mode a class is defined by spectral shape only, so a
+    pixel is classified the same at any brightness.
     """
     if method not in SUPERVISED_METHODS:
         raise ValueError(f"Unknown method {method!r}")
@@ -322,7 +343,7 @@ def segment_supervised(cube: Cube, annotations, method: str = "nearest_mean", n_
     if len(classes) < 2:
         raise ValueError("Supervised segmentation needs annotations of at least two classes "
                          "that cover pixels of the image.")
-    transform = fit_features(cube, normalize, n_components, seed)
+    transform = fit_features(cube, intensity, n_components, seed)
     x = cube_features(cube, transform)
     flat_train = train.ravel()
     train_idx = np.flatnonzero(flat_train)
@@ -365,7 +386,7 @@ def segment_supervised(cube: Cube, annotations, method: str = "nearest_mean", n_
     names = {int(c): CLASS_NAMES[c - 1] for c in classes}
     colors = {int(c): tuple(float(v) for v in CLASS_COLORS[c - 1]) for c in classes}
     seg = Segmentation(labels, method, True, names, colors,
-                       params={"method": method, "n_components": int(n_components), "normalize": bool(normalize),
+                       params={"method": method, "n_components": int(n_components), "intensity": intensity,
                                "k_neighbors": int(k_neighbors), "max_per_class": int(max_per_class),
                                "smooth": int(smooth), "seed": int(seed),
                                "training_pixels": {CLASS_NAMES[c - 1]: int((train_y == c).sum()) for c in classes}},

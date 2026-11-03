@@ -468,6 +468,7 @@ def test_unsupervised_segmentation_overlay_and_save(win, monkeypatch, tmp_path):
     def fake_exec(dlg):
         dlg.clusters.setValue(4)
         dlg.components.setValue(5)
+        dlg.intensity.setCurrentIndex(dlg.intensity.findData("ignore"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(segmentation.UnsupervisedDialog, "exec", fake_exec)
@@ -478,6 +479,8 @@ def test_unsupervised_segmentation_overlay_and_save(win, monkeypatch, tmp_path):
     assert ov.as_labels and ov.segmentation is not None and ov.name == "k-means (4 clusters)"
     assert set(np.unique(ov.data)) == {1, 2, 3, 4}
     assert win.settings.value("segment_unsupervised/clusters", type=int) == 4
+    assert win.settings.value("segment_unsupervised/intensity") == "ignore"
+    assert ov.segmentation.params["intensity"] == "ignore"
     assert win.registry["save_segmentation"].isEnabled()
     # A second run hides the first.
     win.registry["segment_unsupervised"].trigger()
@@ -509,6 +512,7 @@ def test_supervised_segmentation_uses_class_colours(win, monkeypatch, tmp_path):
         seen["classes"] = dlg.n_classes
         seen["ok"] = dlg.ok_button.isEnabled()
         dlg.method.setCurrentIndex(dlg.method.findData("lda"))
+        dlg.intensity.setCurrentIndex(dlg.intensity.findData("ignore_offset"))
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(segmentation.SupervisedDialog, "exec", fake_exec)
@@ -516,6 +520,7 @@ def test_supervised_segmentation_uses_class_colours(win, monkeypatch, tmp_path):
     assert seen == {"classes": 2, "ok": True}
     ov = win.overlays.current()
     assert ov.segmentation.supervised and ov.segmentation.method == "lda"
+    assert ov.segmentation.params["intensity"] == "ignore_offset"
     assert (ov.data == lbl + 1).mean() > 0.95
     assert ov.label_color(1) == (1.0, 0.0, 0.0) and ov.label_color(2) == (0.0, 1.0, 0.0)
     # The overlay is drawn in the annotation class colours.

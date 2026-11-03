@@ -10,7 +10,6 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -21,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..analysis.segmentation import (
+    INTENSITY_MODES,
     SUPERVISED_METHODS,
     Segmentation,
     segment_supervised,
@@ -48,10 +48,16 @@ class _SegmentDialog(QDialog):
         self.components.setValue(min(self._get("components", 10, int), n_bands))
         self.components.setToolTip("Cluster or classify on this many principal components of the cube "
                                    "(faster and less noisy); 'All bands' uses the spectra directly")
-        self.normalize = QCheckBox("Ignore brightness (unit-length spectra)")
-        self.normalize.setToolTip("Scale every spectrum to unit length first, so regions that differ only in "
-                                  "illumination are grouped together (like the spectral angle)")
-        self.normalize.setChecked(self._get("normalize", False, bool))
+        self.intensity = QComboBox()
+        for key, text in INTENSITY_MODES.items():
+            self.intensity.addItem(text, key)
+        self.intensity.setCurrentIndex(max(0, self.intensity.findData(self._get("intensity", "use", str))))
+        self.intensity.setToolTip(
+            "Use intensity: brightness counts, so the same material in light and shadow can split.\n"
+            "Ignore intensity: every spectrum is scaled to unit length, so only its shape decides the class\n"
+            "(spectral angle); a pixel gets the same class at any brightness.\n"
+            "Ignore intensity and offset: also subtracts each spectrum's own mean first, so a constant\n"
+            "offset such as stray light or a dark level is ignored too (correlation between spectra).")
         self.smooth = QComboBox()
         for size, text in SMOOTHING:
             self.smooth.addItem(text, size)
@@ -69,7 +75,7 @@ class _SegmentDialog(QDialog):
 
     def _add_common_rows(self):
         self.form.addRow("Principal components", self.components)
-        self.form.addRow("", self.normalize)
+        self.form.addRow("Intensity", self.intensity)
         self.form.addRow("Smoothing", self.smooth)
 
     def _finish_layout(self):
@@ -81,10 +87,10 @@ class _SegmentDialog(QDialog):
         self.lay.addWidget(buttons)
 
     def common_params(self) -> dict:
-        p = {"n_components": self.components.value(), "normalize": self.normalize.isChecked(),
+        p = {"n_components": self.components.value(), "intensity": self.intensity.currentData(),
              "smooth": int(self.smooth.currentData())}
         self._set("components", p["n_components"])
-        self._set("normalize", p["normalize"])
+        self._set("intensity", p["intensity"])
         self._set("smooth", p["smooth"])
         return p
 
