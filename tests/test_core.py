@@ -387,12 +387,12 @@ def _purity(labels, truth):
     return hit / truth.size
 
 
-@pytest.mark.parametrize("components,normalize", [(0, False), (5, False), (5, True)])
-def test_unsupervised_kmeans_finds_materials(seg_cube, components, normalize):
+@pytest.mark.parametrize("components,intensity", [(0, "use"), (5, "use"), (5, "ignore"), (5, "ignore_offset")])
+def test_unsupervised_kmeans_finds_materials(seg_cube, components, intensity):
     from hsview.analysis import segment_unsupervised
 
     cube, truth = seg_cube
-    seg = segment_unsupervised(cube, n_clusters=4, n_components=components, normalize=normalize)
+    seg = segment_unsupervised(cube, n_clusters=4, n_components=components, intensity=intensity)
     assert seg.labels.shape == truth.shape and seg.labels.dtype == np.int32
     assert set(np.unique(seg.labels)) == {1, 2, 3, 4}
     counts = [seg.pixel_counts[v] for v in (1, 2, 3, 4)]
@@ -511,3 +511,47 @@ def test_segmentation_files_load_with_plain_python(tmp_path, seg_cube):
         assert "annotation_kind" not in z.files
     with pytest.raises(LoadError, match="no annotations"):
         ann_io.load_annotations(tmp_path / "s.pkl")
+
+
+def _relit(cube, offset=False):
+    """The same scene under uneven light: every pixel scaled by 0.2-3x (and shifted, if asked)."""
+    rows, cols, _ = cube.shape
+    rng = np.random.default_rng(1)
+    gain = np.exp(rng.uniform(np.log(0.2), np.log(3.0), (rows, cols, 1)))
+    gain[:, : cols // 2] *= 0.25  # a strong shadow over the left half
+    data = cube.data * gain
+    if offset:
+        data = data + rng.uniform(-0.3, 0.3, (rows, cols, 1))
+    return Cube(data, cube.wavelengths, "nm", name="relit")
+
+
+@pytest.mark.parametrize("intensity,offset", [("ignore", False), ("ignore_offset", False), ("ignore_offset", True)])
+def test_ignoring_intensity_makes_segmentation_brightness_invariant(seg_cube, intensity, offset):
+    from hsview.analysis import segment_supervised, segment_unsupervised
+
+    cube, truth = seg_cube
+    relit = _relit(cube, offset)
+    for method in ("nearest_mean", "lda", "knn"):
+        a = segment_supervised(cube, _training(), method, n_components=5, intensity=intensity)
+        b = segment_supervised(relit, _training(), method, n_components=5, intensity=intensity)
+        assert (a.labels == b.labels).mean() > 0.999, method
+        assert b.params["intensity"] == intensity
+    a = segment_unsupervised(cube, 4, n_components=5, intensity=intensity)
+    b = segment_unsupervised(relit, 4, n_components=5, intensity=intensity)
+    assert _purity(b.labels, truth) > 0.97
+    assert _purity(a.labels, b.labels) > 0.999  # same regions
+
+
+def test_using_intensity_is_fooled_by_shadow(seg_cube):
+    from hsview.analysis import segment_unsupervised
+
+    cube, truth = seg_cube
+    seg = segment_unsupervised(_relit(cube), 4, n_components=5, intensity="use")
+    assert _purity(seg.labels, truth) < 0.9
+
+
+def test_feature_transform_rejects_unknown_intensity_mode():
+    from hsview.analysis.segmentation import FeatureTransform
+
+    with pytest.raises(ValueError, match="intensity"):
+        FeatureTransform("normalize")
