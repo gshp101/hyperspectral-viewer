@@ -59,6 +59,9 @@ _SVG = {
     "bias-up": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     "bias-down": '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>',
     "background": '<path d="M3 3v18h18"/><path d="M6 8c3 0 4 4 7 4s4-3 7-3" opacity=".45"/><path d="M6 17c2 0 3-6 5-6s2 6 4 6 2-3 5-3"/>',
+    "segment": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14c4-1 5-5 9-5s5 3 9 2M12 9v12"/>',
+    "segment-supervised": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14c4-1 5-5 9-5s5 3 9 2M12 9v12"/><circle cx="7" cy="7.5" r="1.8" fill="currentColor"/><circle cx="17" cy="17" r="1.8" fill="currentColor"/>',
+    "save-segmentation": '<path d="M14 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10"/><path d="M3 15c4-1 5-5 9-5"/><path d="M18 2v6M15 5.5 18 8.5l3-3"/>',
     "restore": '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
 }
 

@@ -143,9 +143,20 @@ def load_hdf5(path: str | Path, band_axis: int | None = None, dataset: str | Non
         wavelengths = _find_wavelengths(f, dset)
         units = dset.attrs.get("wavelength_units", "nm" if wavelengths is not None else "")
         reference = f["lbl"][()] if "lbl" in f and f["lbl"].ndim in (2, 3) else None
+        processing = f.attrs.get("processing")
     if isinstance(units, bytes):
         units = units.decode()
-    return Cube(_to_rows_cols_bands(arr, band_axis), wavelengths, units, f"{path.stem}:{dataset}",
+    metadata = {}
+    if processing is not None:
+        import json
+
+        try:
+            history = json.loads(processing.decode() if isinstance(processing, bytes) else str(processing))
+        except ValueError:
+            history = None
+        if history:
+            metadata["analysis"] = history
+    return Cube(_to_rows_cols_bands(arr, band_axis), wavelengths, units, f"{path.stem}:{dataset}", metadata,
                 reference=reference)
 
 
@@ -211,8 +222,12 @@ def cube_from_dict(d: dict, name: str, band_axis: int | None = None) -> Cube:
     if arr.ndim != 3:
         raise LoadError(f"The cube must be a 3-D array, got shape {arr.shape}")
     wl = d.get("wavelengths")
+    metadata = {}
+    if isinstance(d.get("processing"), list) and d["processing"]:
+        metadata["analysis"] = list(d["processing"])  # analyses applied before the cube was saved
     return Cube(_to_rows_cols_bands(arr, band_axis), None if wl is None else np.asarray(wl, dtype=float), "", name,
-                reference=None if reference is None else np.squeeze(np.asarray(reference)), band_names=band_names)
+                metadata, reference=None if reference is None else np.squeeze(np.asarray(reference)),
+                band_names=band_names)
 
 
 def load_pickle(path: str | Path, band_axis: int | None = None, **_) -> Cube:
@@ -230,13 +245,70 @@ def load_pickle(path: str | Path, band_axis: int | None = None, **_) -> Cube:
     return cube_from_dict(d, path.stem, band_axis)
 
 
+CUBE_SAVE_FILTER = ("Pickle (*.pkl);;NumPy archive (*.npz);;HDF5 (*.h5);;All files (*)")
+
+
 def save_cube(path: str | Path, cube: Cube) -> None:
-    """Write a cube as the pickled dict layout ``{'ref', 'wavelengths', 'lbl'}`` that :func:`load_pickle` reads."""
-    d = {"ref": np.asarray(cube.data), "wavelengths": cube.wavelengths}
-    if cube.reference is not None:
-        d["lbl"] = np.asarray(cube.reference)
-    with open(path, "wb") as f:
-        pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+    """Write a cube so that hsview and plain Python can read it back.
+
+    The entries are always ``ref`` (rows x cols x bands), ``wavelengths``
+    (``None``/absent if unknown), ``lbl`` (the reference image, if any) and
+    ``processing`` (the list of analyses applied, e.g. SVD background
+    removal). The suffix picks the container: ``.npz`` (``np.load``; the
+    processing list is a JSON string), ``.h5``/``.hdf5`` (one dataset per
+    entry; processing as a JSON attribute) or, for anything else, a pickled
+    dict as written by the camera tools.
+    """
+    import json
+
+    path = Path(path)
+    ext = path.suffix.lower()
+    processing = list(cube.metadata.get("analysis", []))
+    data = np.asarray(cube.data)
+    if ext == ".npz":
+        arrays = {"ref": data, "processing": np.array(json.dumps(processing))}
+        if cube.wavelengths is not None:
+            arrays["wavelengths"] = cube.wavelengths
+        if cube.reference is not None:
+            arrays["lbl"] = np.asarray(cube.reference)
+        np.savez(path, **arrays)
+    elif ext in (".h5", ".hdf5"):
+        import h5py
+
+        with h5py.File(path, "w") as f:
+            dset = f.create_dataset("ref", data=data)
+            if cube.wavelengths is not None:
+                f.create_dataset("wavelengths", data=cube.wavelengths)
+                dset.attrs["wavelength_units"] = cube.wavelength_units or "nm"
+            if cube.reference is not None:
+                f.create_dataset("lbl", data=np.asarray(cube.reference))
+            f.attrs["processing"] = json.dumps(processing)
+    else:
+        d = {"ref": data, "wavelengths": cube.wavelengths, "processing": processing}
+        if cube.reference is not None:
+            d["lbl"] = np.asarray(cube.reference)
+        with open(path, "wb") as f:
+            pickle.dump(d, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_npz(path: str | Path, band_axis: int | None = None, **_) -> Cube:
+    """NumPy archive with ``ref`` or ``hypercube`` (+ ``wavelengths``, ``lbl``), as :func:`save_cube` writes."""
+    import json
+
+    path = Path(path)
+    with np.load(path, allow_pickle=False) as z:
+        d = {k: z[k] for k in z.files}
+    if not ({"hypercube", "ref"} & d.keys()):
+        cubes = [k for k, v in d.items() if v.ndim == 3]
+        if not cubes:
+            raise LoadError(f"{path.name}: no 'ref' or 'hypercube' array and no 3-D array")
+        d["ref"] = d[max(cubes, key=lambda k: d[k].size)]
+    if "processing" in d:
+        try:
+            d["processing"] = json.loads(str(d["processing"]))
+        except ValueError:
+            d.pop("processing")
+    return cube_from_dict(d, path.stem, band_axis)
 
 
 def load_mat(path: str | Path, band_axis: int | None = None, **_) -> Cube:
@@ -277,6 +349,7 @@ IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif")
 READERS = {
     **dict.fromkeys((".hdr", ".img", ".dat", ".raw", ".bil", ".bip", ".bsq"), load_envi),
     ".npy": load_npy,
+    ".npz": load_npz,
     **dict.fromkeys((".h5", ".hdf5", ".he5", ".nc"), load_hdf5),
     ".mat": load_mat,
     **dict.fromkeys((".tif", ".tiff"), load_tiff),
@@ -335,6 +408,12 @@ def load_overlay(path: str | Path) -> np.ndarray:
     ext = path.suffix.lower()
     if ext == ".npy":
         arr = np.load(path)
+    elif ext == ".npz":
+        with np.load(path, allow_pickle=False) as z:
+            key = "labels" if "labels" in z else next((k for k in z.files if z[k].ndim == 2), None)
+            if key is None:
+                raise LoadError(f"No 2-D array found in {path.name}")
+            arr = z[key]
     elif ext in (".h5", ".hdf5"):
         import h5py
 
@@ -347,7 +426,9 @@ def load_overlay(path: str | Path) -> np.ndarray:
     elif ext in (".pkl", ".pickle", ".p"):
         with open(path, "rb") as f:
             arr = pickle.load(f)
-        if isinstance(arr, dict):
+        if isinstance(arr, dict) and isinstance(arr.get("labels"), np.ndarray) and arr["labels"].ndim == 2:
+            arr = arr["labels"]
+        elif isinstance(arr, dict):
             arr = next((v for k, v in arr.items() if isinstance(v, np.ndarray) and v.ndim == 2), None)
         if not isinstance(arr, np.ndarray):
             raise LoadError(f"{path.name} does not contain a 2-D array")

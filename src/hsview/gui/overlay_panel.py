@@ -19,10 +19,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..io import is_label_image, load_overlay
+from ..io import LoadError, is_label_image, load_overlay
 from .image_view import ImageView
 
-OVERLAY_FILTER = "Images and arrays (*.npy *.tif *.tiff *.png *.jpg *.bmp *.h5 *.hdf5 *.pkl);;All files (*)"
+OVERLAY_FILTER = "Images and arrays (*.npy *.npz *.tif *.tiff *.png *.jpg *.bmp *.h5 *.hdf5 *.pkl);;All files (*)"
 
 
 def label_colors(n: int) -> np.ndarray:
@@ -34,8 +34,12 @@ def label_colors(n: int) -> np.ndarray:
     return np.vstack([[0, 0, 0], cols[:n]])
 
 
-def colorize(arr: np.ndarray, as_labels: bool) -> np.ndarray:
-    """RGBA uint8 rendering of an overlay array."""
+def colorize(arr: np.ndarray, as_labels: bool, colors: dict | None = None) -> np.ndarray:
+    """RGBA uint8 rendering of an overlay array.
+
+    ``colors`` maps label values to RGB in 0..1 (e.g. annotation class colours
+    for a supervised segmentation); other labels get the default palette.
+    """
     if arr.ndim == 3:  # an RGB(A) image is shown as-is
         rgb = arr[:, :, :3]
         if rgb.dtype != np.uint8:
@@ -46,6 +50,10 @@ def colorize(arr: np.ndarray, as_labels: bool) -> np.ndarray:
         values = np.unique(labels)
         values = values[values != 0]
         lut_rgb = label_colors(len(values))
+        if colors:
+            for i, v in enumerate(values):
+                if int(v) in colors:
+                    lut_rgb[i + 1] = colors[int(v)]
         index = np.searchsorted(values, labels) + 1
         index[labels == 0] = 0
         rgba = np.zeros(arr.shape + (4,), np.uint8)
@@ -70,8 +78,12 @@ class Overlay:
     as_labels: bool
     opacity: float = 0.5
     visible: bool = True
+    colors: dict | None = None  # label value -> RGB in 0..1
+    segmentation: object = None  # the hsview.analysis.Segmentation that made it, if any
 
     def label_color(self, value: int):
+        if self.colors and int(value) in self.colors:
+            return tuple(self.colors[int(value)])
         values = np.unique(self.data)
         values = values[values != 0]
         cols = label_colors(len(values))
@@ -132,16 +144,35 @@ class OverlayPanel(QWidget):
             self.add_file(path)
 
     def add_file(self, path) -> Overlay | None:
+        """Add an image or array file; hsview segmentation files keep their label colours and metadata."""
+        from ..analysis.segmentation import read_segmentation, segmentation_from_dict
+
+        seg = None
         try:
-            arr = load_overlay(path)
+            if Path(path).suffix.lower() in (".npz", ".pkl", ".pickle", ".p"):
+                try:
+                    seg = segmentation_from_dict(read_segmentation(path))
+                except LoadError:
+                    seg = None
+            arr = seg.labels if seg is not None else load_overlay(path)
         except Exception as exc:
             QMessageBox.warning(self, "Could not open overlay", str(exc))
             return None
         if self.settings:
             self.settings.setValue("paths/last_dir", str(Path(path).parent))
+        if seg is not None:
+            return self.add_segmentation(seg, Path(path).stem)
         return self.add_array(arr, Path(path).stem)
 
-    def add_array(self, arr: np.ndarray, name: str, as_labels: bool | None = None) -> Overlay | None:
+    def add_segmentation(self, seg, name: str | None = None) -> Overlay | None:
+        """Show a :class:`hsview.analysis.Segmentation` as a label overlay in its own colours."""
+        ov = self.add_array(seg.labels, name or seg.name, as_labels=True, colors=seg.label_colors)
+        if ov is not None:
+            ov.segmentation = seg
+        return ov
+
+    def add_array(self, arr: np.ndarray, name: str, as_labels: bool | None = None,
+                  colors: dict | None = None) -> Overlay | None:
         arr = np.asarray(arr)
         if self.shape is not None and arr.shape[:2] != tuple(self.shape):
             QMessageBox.warning(self, "Size mismatch", f"Overlay '{name}' is {arr.shape[1]}×{arr.shape[0]} but the "
@@ -150,9 +181,9 @@ class OverlayPanel(QWidget):
         if as_labels is None:
             as_labels = is_label_image(arr)
         self._counter += 1
-        ov = Overlay(f"ov{self._counter}", name, arr, as_labels)
+        ov = Overlay(f"ov{self._counter}", name, arr, as_labels, colors=colors)
         self.overlays[ov.key] = ov
-        self.view.set_overlay(ov.key, colorize(arr, as_labels), ov.opacity)
+        self.view.set_overlay(ov.key, colorize(arr, as_labels, colors), ov.opacity)
         item = QListWidgetItem(f"{name}  ({'labels' if as_labels else 'image'})")
         item.setData(Qt.ItemDataRole.UserRole, ov.key)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)

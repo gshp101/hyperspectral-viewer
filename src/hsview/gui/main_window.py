@@ -27,18 +27,23 @@ from PyQt6.QtWidgets import (
 from .. import __version__
 from .. import annotations as ann_io
 from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
-from ..io import Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
+from ..analysis.segmentation import is_segmentation_file, save_segmentation, segmentation_from_labels
+from ..io import CUBE_SAVE_FILTER, Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
 from .actions import ActionRegistry
 from .analysis import ANALYSES
 from .display_panel import REF_ROUTES, ROUTES, DisplayPanel
 from .app_icons import APP_ICONS, DEFAULT_APP_ICON, app_icon
 from .icons import swatch_icon
 from .image_view import ImageView
-from .overlay_panel import OverlayPanel
+from .overlay_panel import OVERLAY_FILTER, OverlayPanel
+from .segmentation import run_supervised, run_unsupervised
 from .spectrum_panel import ClassPlotDialog, SpectrumPanel
 from .toolbar import ToolbarManager
 
 ANNOTATION_FILTER = "Annotations (*.pkl *.json);;Pickle (*.pkl);;JSON (*.json);;All files (*)"
+ANNOTATION_LOAD_FILTER = ("Annotations and segmentations (*.pkl *.json *.npz);;Pickle (*.pkl);;JSON (*.json);;"
+                          "Segmentation (*.npz *.pkl);;All files (*)")
+SEGMENTATION_FILTER = "Pickle (*.pkl);;NumPy archive (*.npz)"
 CONTRAST_STEP, BIAS_STEP = 5, 8
 
 
@@ -228,6 +233,10 @@ class MainWindow(QMainWindow):
             "hide_overlays": lambda: self.overlays.set_all_visible(False),
             "overlay_opacity": lambda: self.overlay_opacity_dialog(),
             "analysis_undo": self.undo_analysis,
+            "segment_unsupervised": lambda: self.run_segmentation(run_unsupervised),
+            "segment_supervised": lambda: self.run_segmentation(run_supervised),
+            "save_segmentation": self.save_segmentation_dialog,
+            "open_segmentation": self.open_segmentation_dialog,
             "analysis_restore": self.restore_original_cube,
             "plot_points": lambda: self.plot_by_class("point"),
             "plot_regions": lambda: self.plot_by_class("region"),
@@ -284,7 +293,7 @@ class MainWindow(QMainWindow):
         return {
             "&File": ["open_cube", "open_by_id", "open_reference", "add_overlay", "load_filter", None,
                       "load_annotations", "save_annotations", "save_annotations_as", None,
-                      "save_spectra", "export_csv", "save_cube", None, "quit"],
+                      "save_spectra", "export_csv", "save_cube", "save_segmentation", None, "quit"],
             "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None,
                       "finish_polygon", "cancel_drawing", None, "customize"],
             "&Mode": ["mode_navigate", "mode_select", "mode_point", "mode_rect", "mode_polygon"],
@@ -302,6 +311,8 @@ class MainWindow(QMainWindow):
             "&Plot": ["plot_points", "plot_regions", None, "plot_separate", "close_plots", None,
                       "spectra_cursor", "spectra_std", "spectra_by_class", "spectra_labels"],
             "&Analysis": [cmd.id for cmd in ANALYSES] + [None, "analysis_undo", "analysis_restore"],
+            "&Segment": ["segment_unsupervised", "segment_supervised", None, "save_segmentation",
+                         "open_segmentation"],
             "&Toolbars": [],
             "&Help": ["about"],
         }
@@ -402,6 +413,10 @@ class MainWindow(QMainWindow):
             if spec.category.startswith("Channel ") or spec.category == "Analysis" or spec.id in (
                     "save_cube", "show_rgb", "contrast_up", "contrast_down", "bias_up", "bias_down"):
                 r[spec.id].setEnabled(has_cube)
+        r["segment_unsupervised"].setEnabled(has_cube)
+        r["segment_supervised"].setEnabled(has_cube and len(self.store) > 0)
+        r["open_segmentation"].setEnabled(has_cube)
+        r["save_segmentation"].setEnabled(self.segmentation_overlay() is not None)
         r["analysis_undo"].setEnabled(bool(self.cube_history))
         r["analysis_restore"].setEnabled(bool(self.cube_history))
         r["true_colour"].setEnabled(has_cube and self.cube.wavelengths is not None)
@@ -526,8 +541,10 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def save_cube_dialog(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save cube", str(Path(self._last_dir()) / f"{self.cube.name}.pkl"),
-                                              "Pickle (*.pkl)")
+        title = "Save processed cube" if self.cube_history or self.cube.metadata.get("analysis") else "Save cube"
+        name = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in self.cube.name).strip("_") or "cube"
+        path, _ = QFileDialog.getSaveFileName(self, title, str(Path(self._last_dir()) / f"{name}.pkl"),
+                                              CUBE_SAVE_FILTER)
         if path:
             try:
                 save_cube(path, self.cube)
@@ -561,6 +578,61 @@ class MainWindow(QMainWindow):
         self.replace_cube(result)
         self.statusBar().showMessage(f"{cmd.text.replace('…', '')}: showing {result.name}", 8000)
         return result
+
+    # ------------------------------------------------------- segmentation
+    def segmentation_overlay(self):
+        """The selected overlay if it is a label image, else the most recent visible (or any) label overlay."""
+        cur = self.overlays.current()
+        if cur is not None and cur.as_labels:
+            return cur
+        labels = [ov for ov in self.overlays.overlays.values() if ov.as_labels]
+        visible = [ov for ov in labels if ov.visible]
+        return (visible or labels or [None])[-1]
+
+    def run_segmentation(self, run):
+        """Run a segmentation dialog on the current (possibly processed) cube and show the result as an overlay."""
+        if self.cube is None:
+            return None
+        try:
+            seg = run(self)
+        except Exception as exc:  # show numerical failures instead of crashing
+            QMessageBox.warning(self, "Segmentation", str(exc))
+            return None
+        if seg is None:
+            return None
+        for ov in self.overlays.overlays.values():  # only the newest segmentation is shown at first
+            if ov.segmentation is not None and ov.visible:
+                self.overlays.set_visible(ov.key, False)
+        ov = self.overlays.add_segmentation(seg)
+        if ov is not None:
+            self.statusBar().showMessage(f"Segmentation: {seg.name}. Save it with Segment → Save segmentation…", 8000)
+        self._update_actions()
+        return seg
+
+    def save_segmentation_dialog(self):
+        ov = self.segmentation_overlay()
+        if ov is None:
+            return
+        seg = ov.segmentation or segmentation_from_labels(ov.data, self.cube, ov.name, ov.colors)
+        base = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in self.cube.name).strip("_") or "cube"
+        path, _ = QFileDialog.getSaveFileName(self, f"Save segmentation '{ov.name}'",
+                                              str(Path(self._last_dir()) / f"{base}_segmentation.pkl"),
+                                              SEGMENTATION_FILTER)
+        if not path:
+            return
+        try:
+            save_segmentation(path, seg)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save segmentation", str(exc))
+            return
+        self._remember(path)
+        self.statusBar().showMessage(f"Saved segmentation to {path}", 5000)
+
+    def open_segmentation_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open segmentation", self._last_dir(),
+                                              "Segmentations (*.pkl *.npz);;" + OVERLAY_FILTER)
+        if path:
+            self.overlays.add_file(path)
 
     def undo_analysis(self):
         if self.cube_history:
@@ -640,7 +712,7 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Discard
 
     def load_annotations_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load annotations", self._last_dir(), ANNOTATION_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, "Load annotations", self._last_dir(), ANNOTATION_LOAD_FILTER)
         if path:
             self.load_annotations(path)
 
@@ -652,7 +724,8 @@ class MainWindow(QMainWindow):
             return False
         self.store.replace(items)
         self.store.modified = False
-        self.annotation_path = str(path)
+        # Annotations taken from a segmentation file must not be saved over that file.
+        self.annotation_path = None if is_segmentation_file(path) else str(path)
         self._update_actions()
         return True
 

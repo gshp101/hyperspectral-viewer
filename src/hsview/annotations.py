@@ -226,14 +226,25 @@ def save_annotations(path, items, cube: Cube | None = None):
 
 
 def load_annotations(path) -> list[Annotation]:
+    """Read annotations from ``.json``, the original viewer's pickle, or an hsview segmentation file."""
     path = Path(path)
     if path.suffix.lower() == ".json":
         return from_json_dict(json.loads(path.read_text()))
+    if path.suffix.lower() == ".npz":
+        from .analysis.segmentation import annotations_from_segmentation, read_segmentation
+
+        return annotations_from_segmentation(read_segmentation(path))
     try:
         with open(path, "rb") as f:
             d = pickle.load(f)
     except Exception as exc:
         raise LoadError(f"Could not load {path.name} as a pickle file") from exc
+    if isinstance(d, dict) and d.get("format") == "hsview-segmentation":
+        from .analysis.segmentation import annotations_from_segmentation
+
+        if d.get("annotations") is None:
+            raise LoadError(f"{path.name} is an unsupervised segmentation and holds no annotations")
+        return annotations_from_segmentation(d)
     return from_legacy_dict(d)
 
 
