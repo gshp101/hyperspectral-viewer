@@ -30,20 +30,9 @@ from PyQt6.QtWidgets import (
 )
 
 from ..io import Cube, LoadError, load_filter, read_image
-from ..processing import SCALINGS, apply_filter, band_image, compose, contrast_bias_lut, parse_band_spec, spectral_energy
+from ..processing import SCALINGS, apply_filter, band_image, band_window, compose, contrast_bias_lut, parse_band_spec, spectral_energy
+from ..ui_spec import DEFAULT_BIAS, DEFAULT_CONTRAST, REF_ROUTES, ROUTES, SCALING_LABELS, SOURCES, TRUE_COLOUR
 
-ROUTES = ("None", "Red", "Green", "Blue", "Gray")
-REF_ROUTES = ("None", "Show", "Overlay")
-SOURCES = ("Band", "Band sum", "Filter")
-SCALING_LABELS = {"global": "Shared min–max", "channel": "Per-channel min–max", "percentile": "Per-channel 2–98 %"}
-DEFAULT_CONTRAST, DEFAULT_BIAS = 45, 0
-
-
-def band_window(center: int, width: int, n_bands: int) -> range:
-    """The ``width`` bands centred on ``center``, shifted to stay inside 0..n_bands-1."""
-    width = max(1, min(int(width), n_bands))
-    start = min(max(0, int(center) - (width - 1) // 2), n_bands - width)
-    return range(start, start + width)
 
 
 def _hslider(lo, hi, value):
@@ -500,7 +489,7 @@ class DisplayPanel(QWidget):
     def true_colour(self):
         if self.cube is None or self.cube.wavelengths is None:
             return
-        self.show_rgb(["620-670nm", "530-570nm", "450-490nm"])
+        self.show_rgb(list(TRUE_COLOUR))
 
     def step_band(self, delta: int):
         """Move the band of the first channel showing a single band."""
