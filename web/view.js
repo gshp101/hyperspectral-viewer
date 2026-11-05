@@ -185,7 +185,7 @@ export class ImageView {
   _inImage(p) { return this.image && p[0] >= 0 && p[1] >= 0 && p[0] < this.width && p[1] < this.height; }
 
   _down(e) {
-    this.canvas.focus();
+    this.canvas.focus({ preventScroll: true });
     const s = this._pos(e), p = this.toScene(...s);
     if (e.button === 1 || (e.button === 0 && this.mode === "navigate")) {
       e.preventDefault();

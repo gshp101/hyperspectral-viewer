@@ -168,7 +168,7 @@ export function dialog({ title, body, buttons = [{ label: "OK", value: true, def
       modalDepth--;
       backdrop.remove();
       document.removeEventListener("keydown", onKey, true);
-      if (prevFocus && prevFocus.focus) prevFocus.focus();
+      if (prevFocus && prevFocus.focus) prevFocus.focus({ preventScroll: true });
       resolve(value);
     };
     const btns = {};
@@ -192,7 +192,7 @@ export function dialog({ title, body, buttons = [{ label: "OK", value: true, def
     layer().append(backdrop);
     if (onOpen) onOpen({ box, buttons: btns, close: finish });
     const first = box.querySelector("input, select, textarea") || footer.querySelector(".default");
-    if (first) setTimeout(() => { first.focus(); if (first.select) first.select(); }, 0);
+    if (first) setTimeout(() => { first.focus({ preventScroll: true }); if (first.select) first.select(); }, 0);
   });
 }
 

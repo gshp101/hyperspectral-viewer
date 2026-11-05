@@ -771,12 +771,17 @@ function setupSplitters() {
   const left = document.getElementById("left"), right = document.getElementById("right");
   left.style.width = settings.get("layout/left_w", 330) + "px";
   right.style.width = settings.get("layout/right_w", 460) + "px";
-  const drag = (handle, fn) => handle.addEventListener("mousedown", (e) => {
+  // Pointer events, so the splitters can be dragged with a finger or pencil as well as a mouse.
+  const drag = (handle, fn) => handle.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     const move = (ev) => fn(ev);
-    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); scheduleSpectra(); };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up); scheduleSpectra();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   });
   drag(document.getElementById("split-l"), (e) => {
     const w = Math.max(200, Math.min(window.innerWidth * 0.5, e.clientX - left.getBoundingClientRect().left));
@@ -1574,6 +1579,10 @@ async function main() {
     e.preventDefault(); center.classList.remove("drop");
     if (e.dataTransfer.files.length && await confirmDiscard()) await openCubeFiles([...e.dataTransfer.files]);
   });
+  // The window never scrolls as a whole; undo it if Safari scrolls it anyway (e.g. after a menu or the keyboard closes).
+  const unscroll = () => { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); };
+  window.addEventListener("scroll", unscroll);
+  window.visualViewport?.addEventListener("resize", unscroll);
   window.addEventListener("beforeunload", (e) => { if (S.modified) { e.preventDefault(); e.returnValue = ""; } });
 
   // ?demo opens the demo cube straight away, ?demo=pavia the Pavia University scene.
