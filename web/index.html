@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hsview</title>
+<link rel="icon" id="favicon" href="data:,">
+<link rel="stylesheet" href="hsview.css">
+</head>
+<body>
+<div id="app">
+  <div id="menubar" role="menubar"></div>
+  <div id="toolbars"></div>
+  <div id="main">
+    <div id="left" class="dock-column">
+      <section class="dock" id="dock-display">
+        <header><span>Display</span><button class="dock-close" title="Close" data-toggle="toggle_display">×</button></header>
+        <div class="dock-body scroll" id="display-panel"></div>
+      </section>
+      <div class="splitter-h" id="split-left"></div>
+      <section class="dock" id="dock-overlays">
+        <header><span>Overlays</span><button class="dock-close" title="Close" data-toggle="toggle_overlays">×</button></header>
+        <div class="dock-body" id="overlay-panel"></div>
+      </section>
+    </div>
+    <div class="splitter-v" id="split-l"></div>
+    <div id="center">
+      <canvas id="view" tabindex="0"></canvas>
+      <div id="empty-hint">
+        <p>Open a cube with <b>File → Open cube…</b> or drop a file here.</p>
+        <p><button id="demo-button">Open the demo cube</button></p>
+      </div>
+    </div>
+    <div class="splitter-v" id="split-r"></div>
+    <div id="right" class="dock-column">
+      <section class="dock" id="dock-spectra">
+        <header><span>Spectra</span><button class="dock-close" title="Close" data-toggle="toggle_spectra">×</button></header>
+        <div class="dock-body" id="spectra-panel"></div>
+      </section>
+    </div>
+  </div>
+  <div id="statusbar"><span id="status-message"></span><span id="status-permanent"></span></div>
+</div>
+<div id="loading">
+  <div class="loading-box">
+    <img id="loading-icon" alt="" width="96" height="96">
+    <h1>hsview</h1>
+    <p id="loading-text">Starting Python (Pyodide)…</p>
+    <div class="progress"><div></div></div>
+  </div>
+</div>
+<div id="busy" hidden><div class="busy-box"><div class="spinner"></div><span id="busy-text">Working…</span></div></div>
+<div id="layer"></div>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

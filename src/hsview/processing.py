@@ -54,6 +54,13 @@ def parse_band_spec(spec: str, cube: Cube) -> np.ndarray:
     return np.unique(indices)
 
 
+def band_window(center: int, width: int, n_bands: int) -> range:
+    """The ``width`` bands centred on ``center``, shifted to stay inside 0..n_bands-1."""
+    width = max(1, min(int(width), n_bands))
+    start = min(max(0, int(center) - (width - 1) // 2), n_bands - width)
+    return range(start, start + width)
+
+
 def band_image(cube: Cube, bands, mode: str = "sum") -> np.ndarray:
     """Combine the selected bands into one 2-D float image (sum or mean)."""
     bands = np.atleast_1d(bands)

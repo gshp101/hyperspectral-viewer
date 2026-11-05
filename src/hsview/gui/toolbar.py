@@ -42,35 +42,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .actions import SEPARATOR, SPACER, ActionRegistry
+from ..ui_spec import DEFAULT_TOOLBAR_CONFIG, ICON_SIZES, SEPARATOR, SPACER, STYLE_LABELS
+from .actions import ActionRegistry
 
-DEFAULT_CONFIG = {
-    "icon_size": 22,
-    "style": "icon",
-    "toolbars": [
-        {"name": "File", "visible": True, "items": [
-            "open_cube", "open_reference", "add_overlay", SEPARATOR,
-            "load_annotations", "save_annotations", "save_spectra", "export_csv", "save_cube"]},
-        {"name": "Annotate", "visible": True, "items": [
-            "mode_navigate", "mode_select", "mode_point", "mode_rect", "mode_polygon", SEPARATOR,
-            "class_selector", SEPARATOR, "undo", "redo", "delete_selected", "clear_annotations"]},
-        {"name": "View", "visible": True, "items": [
-            "zoom_in", "zoom_out", "zoom_fit", "zoom_actual", SEPARATOR,
-            "prev_band", "next_band", "band_readout", SEPARATOR,
-            "true_colour", "reset_contrast", SEPARATOR, "plot_points", "plot_regions", "plot_separate"]},
-        {"name": "Analysis", "visible": True, "items": [
-            "analysis_svd_background", "analysis_undo", "analysis_restore", SEPARATOR,
-            "segment_unsupervised", "segment_supervised", "save_segmentation"]},
-    ],
-}
+DEFAULT_CONFIG = DEFAULT_TOOLBAR_CONFIG
 
-STYLES = {
-    "icon": ("Icons only", Qt.ToolButtonStyle.ToolButtonIconOnly),
-    "text": ("Text only", Qt.ToolButtonStyle.ToolButtonTextOnly),
-    "beside": ("Text beside icons", Qt.ToolButtonStyle.ToolButtonTextBesideIcon),
-    "under": ("Text under icons", Qt.ToolButtonStyle.ToolButtonTextUnderIcon),
+_QT_STYLES = {
+    "icon": Qt.ToolButtonStyle.ToolButtonIconOnly,
+    "text": Qt.ToolButtonStyle.ToolButtonTextOnly,
+    "beside": Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+    "under": Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
 }
-ICON_SIZES = (16, 20, 22, 24, 28, 32, 40, 48)
+STYLES = {key: (label, _QT_STYLES[key]) for key, label in STYLE_LABELS.items()}
 SETTINGS_KEY = "toolbars/config"
 
 

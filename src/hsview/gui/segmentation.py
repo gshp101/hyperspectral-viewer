@@ -28,8 +28,8 @@ from ..analysis.segmentation import (
     training_label_image,
 )
 from ..annotations import CLASS_NAMES
+from ..ui_spec import SMOOTHING
 
-SMOOTHING = [(0, "Off"), (3, "3 × 3"), (5, "5 × 5"), (7, "7 × 7"), (9, "9 × 9")]
 
 
 class _SegmentDialog(QDialog):

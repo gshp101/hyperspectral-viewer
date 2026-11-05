@@ -29,6 +29,7 @@ from .. import annotations as ann_io
 from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
 from ..analysis.segmentation import is_segmentation_file, save_segmentation, segmentation_from_labels
 from ..io import CUBE_SAVE_FILTER, Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
+from ..ui_spec import BIAS_STEP, CONTRAST_STEP, TRUE_COLOUR, menu_layout
 from .actions import ActionRegistry
 from .analysis import ANALYSES
 from .display_panel import REF_ROUTES, ROUTES, DisplayPanel
@@ -44,7 +45,6 @@ ANNOTATION_FILTER = "Annotations (*.pkl *.json);;Pickle (*.pkl);;JSON (*.json);;
 ANNOTATION_LOAD_FILTER = ("Annotations and segmentations (*.pkl *.json *.npz);;Pickle (*.pkl);;JSON (*.json);;"
                           "Segmentation (*.npz *.pkl);;All files (*)")
 SEGMENTATION_FILTER = "Pickle (*.pkl);;NumPy archive (*.npz)"
-CONTRAST_STEP, BIAS_STEP = 5, 8
 
 
 class BandSpecDialog(QDialog):
@@ -286,36 +286,8 @@ class MainWindow(QMainWindow):
         combo.currentIndexChanged.connect(sync)
         sync(combo.currentIndex())
 
-    # Menu layout: lists of action ids, None for a separator, (title, [...]) for a submenu.
     def _menu_layout(self):
-        channels = [(f"Band channel {c + 1}", [f"ch{c}_band", f"ch{c}_width", f"ch{c}_sum", f"ch{c}_filter", None]
-                     + [f"ch{c}_route_{x.lower()}" for x in ROUTES]) for c in range(len(self.display.channels))]
-        return {
-            "&File": ["open_cube", "open_by_id", "open_reference", "add_overlay", "load_filter", None,
-                      "load_annotations", "save_annotations", "save_annotations_as", None,
-                      "save_spectra", "export_csv", "save_cube", "save_segmentation", None, "quit"],
-            "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None,
-                      "finish_polygon", "cancel_drawing", None, "customize"],
-            "&Mode": ["mode_navigate", "mode_select", "mode_point", "mode_rect", "mode_polygon"],
-            "&Class": [f"class_{i}" for i in range(len(CLASS_NAMES))],
-            "&View": ["zoom_in", "zoom_out", "zoom_fit", "zoom_actual", None,
-                      "toggle_display", "toggle_overlays", "toggle_spectra"],
-            "&Display": ["prev_band", "next_band", "true_colour", "show_rgb", None, *channels,
-                         ("Reference image", ["open_reference", "reverse_rgb", "ref_opacity", None,
-                                              "ref_route_none", "ref_route_show", "ref_route_overlay"]),
-                         None, ("Scaling", ["scaling_global", "scaling_channel", "scaling_percentile"]),
-                         ("Contrast", ["contrast_up", "contrast_down", "bias_up", "bias_down", None,
-                                       "reset_contrast"])],
-            "&Overlays": ["add_overlay", "remove_overlay", "clear_overlays", None, "show_overlays", "hide_overlays",
-                          "overlay_opacity"],
-            "&Plot": ["plot_points", "plot_regions", None, "plot_separate", "close_plots", None,
-                      "spectra_cursor", "spectra_std", "spectra_by_class", "spectra_labels"],
-            "&Analysis": [cmd.id for cmd in ANALYSES] + [None, "analysis_undo", "analysis_restore"],
-            "&Segment": ["segment_unsupervised", "segment_supervised", None, "save_segmentation",
-                         "open_segmentation"],
-            "&Toolbars": [],
-            "&Help": ["about"],
-        }
+        return menu_layout(ANALYSES, len(self.display.channels))
 
     def _add_menu_items(self, menu, ids):
         for entry in ids:
@@ -674,7 +646,7 @@ class MainWindow(QMainWindow):
         chans = self.display.channels
         defaults = [ch.spec.text() for ch in chans]
         if not any(defaults) and self.cube.wavelengths is not None:
-            defaults = ["620-670nm", "530-570nm", "450-490nm"]
+            defaults = list(TRUE_COLOUR)
         dlg = BandSpecDialog("RGB from bands", ["Red", "Green", "Blue"], defaults, chans[0].sum_mode.currentText(), self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.display.show_rgb(dlg.values(), dlg.mode.currentText())
