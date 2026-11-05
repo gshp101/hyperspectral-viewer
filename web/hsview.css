@@ -30,17 +30,19 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; overflow: hidden; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
 body { background: var(--bg); color: var(--text); font: 13px/1.35 var(--font); user-select: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
-#app { display: flex; flex-direction: column; height: 100vh; }
+/* Fixed to the visible area: on iPad Safari 100vh is taller than what shows below the tab bar, and the page
+   would scroll the menu bar up behind it. */
+#app { display: flex; flex-direction: column; position: fixed; inset: 0; }
 
 /* ------------------------------------------------------------- menus */
 #menubar { display: flex; flex-wrap: wrap; background: var(--bg); border-bottom: 1px solid var(--border); padding: 0 2px; }
 .menu-title { padding: 3px 8px; cursor: default; border-radius: 3px; white-space: nowrap; }
 .menu-title.open, .menu-title:hover { background: var(--hover); }
 .menu-title u, .menu-item u { text-decoration: underline; }
-.menu { position: fixed; z-index: 1000; min-width: 180px; max-height: calc(100vh - 8px); overflow-y: auto;
+.menu { position: fixed; z-index: 1000; min-width: 180px; max-height: calc(100dvh - 8px); overflow-y: auto;
   background: var(--menu); border: 1px solid var(--border); box-shadow: var(--shadow); padding: 3px 0; border-radius: 3px; }
 .menu-item { display: grid; grid-template-columns: 22px 20px 1fr auto 14px; align-items: center; gap: 2px;
   padding: 3px 6px 3px 4px; cursor: default; white-space: nowrap; }
@@ -83,6 +85,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dock-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 #left { width: 330px; }
 #right { width: 460px; }
+/* On narrow screens (an iPad held upright) the panels give way so the image keeps about a third of the width. */
+#left { max-width: 32vw; }
+#right { max-width: 34vw; }
 .dock-column.hidden, .dock.hidden, .splitter-v.hidden, .splitter-h.hidden { display: none; }
 .dock { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; }
 #dock-overlays { flex: 0 0 180px; }
@@ -94,6 +99,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .splitter-v { width: 5px; cursor: col-resize; flex: 0 0 auto; }
 .splitter-h { height: 5px; cursor: row-resize; flex: 0 0 auto; }
 .splitter-v:hover, .splitter-h:hover { background: var(--hover); }
+.splitter-v, .splitter-h { touch-action: none; }
+@media (pointer: coarse) { .splitter-v { width: 10px; } .splitter-h { height: 10px; } }
 #center { position: relative; flex: 1 1 auto; min-width: 100px; background: var(--canvas); }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
 #center.drop::after { content: "Drop to open"; position: absolute; inset: 10px; border: 3px dashed #9cc7ea;
@@ -139,7 +146,7 @@ label.check { display: inline-flex; align-items: center; gap: 4px; white-space: 
 #layer > * { pointer-events: auto; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .18); display: flex; align-items: center; justify-content: center; }
 .dialog { background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 6px;
-  min-width: 300px; max-width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+  min-width: 300px; max-width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; }
 .dialog > header, .window > header { padding: 6px 10px; font-weight: 600; border-bottom: 1px solid var(--border); cursor: move;
   display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dialog > .body { padding: 12px; overflow: auto; user-select: text; }
@@ -190,7 +197,3 @@ table.shortcuts tr.conflict input { border-color: var(--danger); }
 .tooltip { position: fixed; z-index: 3000; background: #ffffe1; color: #000; border: 1px solid #888; padding: 2px 6px;
   font-size: 12px; white-space: pre-line; pointer-events: none; max-width: 420px; }
 
-@media (max-width: 760px) {
-  #left { width: 240px; }
-  #right { width: 260px; }
-}
