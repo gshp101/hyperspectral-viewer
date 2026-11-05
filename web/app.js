@@ -1131,7 +1131,7 @@ async function runSegmentation(fn) {
 // ------------------------------------------------------------- commands
 const CUBE_EXTS = [".hdr", ".img", ".dat", ".raw", ".bil", ".bip", ".bsq", ".npy", ".npz", ".h5", ".hdf5", ".he5", ".nc", ".mat",
   ".tif", ".tiff", ".pkl", ".pickle", ".p", ".jpg", ".jpeg", ".png", ".bmp", ".gif"];
-const OVERLAY_EXTS = ".npy,.npz,.tif,.tiff,.png,.jpg,.bmp,.h5,.hdf5,.pkl";
+const OVERLAY_EXTS = ".npy,.npz,.tif,.tiff,.png,.jpg,.bmp,.h5,.hdf5,.mat,.pkl";
 const IMAGE_EXTS = ".jpg,.jpeg,.png,.bmp,.tif,.tiff";
 
 async function confirmDiscard() {
@@ -1179,6 +1179,76 @@ async function openDemo() {
   const info = await busy("Making the demo cube…", () => call("load_demo"));
   cubeLoaded(info);
   statusMessage("Demo cube: 160 × 120 pixels, 100 bands, with a reference photo and a hidden label overlay", 8000);
+}
+
+// ------------------------------------------------------- example scenes
+const DATASET_CACHE = "hsview-datasets";
+
+/** Download one file of an example scene, trying its URLs in order. Kept in the browser's cache for next time. */
+async function fetchDatasetFile(file, onBytes) {
+  let cache = null;
+  try { cache = await caches.open(DATASET_CACHE); } catch { /* no Cache API (e.g. not https): download every time */ }
+  for (const url of file.urls) {
+    const hit = cache && await cache.match(url);
+    if (hit) { const b = new Uint8Array(await hit.arrayBuffer()); if (b.length === file.size) { onBytes(b.length); return b; } }
+  }
+  const errors = [];
+  for (const url of file.urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const parts = []; let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value); got += value.length; onBytes(got);
+      }
+      if (got !== file.size) throw new Error(`got ${got} bytes, expected ${file.size}`);
+      const bytes = new Uint8Array(got); let at = 0;
+      for (const p of parts) { bytes.set(p, at); at += p.length; }
+      if (cache) await cache.put(url, new Response(bytes)).catch(() => {});
+      return bytes;
+    } catch (err) {
+      errors.push(`${url}: ${err.message || err}`);  // the publisher's server may not allow downloads from other sites
+    }
+  }
+  throw new Error(`Could not download ${file.name}:\n${errors.join("\n")}`);
+}
+
+async function openDataset(key) {
+  if (!(await confirmDiscard())) return;
+  const ds = T.datasets[key];
+  const mb = (n) => (n / 1e6).toFixed(1);
+  let cached = false;
+  try {
+    const cache = await caches.open(DATASET_CACHE);
+    cached = (await Promise.all(Object.values(ds.files).map(async (f) => {
+      for (const u of f.urls) if (await cache.match(u)) return true;
+      return false;
+    }))).every(Boolean);
+  } catch { /* no cache */ }
+  if (!cached && !(await question(ds.title, `Download ${ds.title} (${Math.round(ds.size / 1e6)} MB)?\n\n${ds.description}.\n\n${ds.credit}\n\nThe browser keeps a copy, so it is only downloaded once.`))) return;
+  const info = await guarded(`Could not open ${ds.title}`, async () => {
+    await ensurePackages(packagesFor(ds.files.cube.name));
+    const dir = `/work/${key}`;
+    pyodide.FS.mkdirTree(dir);
+    const paths = {};
+    return busy(`Downloading ${ds.title}…`, async () => {
+      const text = document.getElementById("busy-text");
+      let before = 0;
+      for (const [role, file] of Object.entries(ds.files)) {
+        const bytes = await fetchDatasetFile(file, (n) => { text.textContent = `Downloading ${ds.title}: ${mb(before + n)} of ${mb(ds.size)} MB`; });
+        before += file.size;
+        paths[role] = `${dir}/${file.name}`;
+        pyodide.FS.writeFile(paths[role], bytes);
+      }
+      text.textContent = `Opening ${ds.title}…`;
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 20)));
+      return call("open_dataset", key, paths);
+    });
+  });
+  if (info) cubeLoaded(info);
 }
 
 async function openByIdDialog() {
@@ -1370,7 +1440,7 @@ function about() {
 function defineActions() {
   const has = () => !!S.has_cube;
   const run = {
-    open_cube: openCubeDialog, open_by_id: openByIdDialog, open_reference: openReferenceDialog,
+    open_cube: openCubeDialog, open_demo: openDemo, open_pavia: () => openDataset("pavia_university"), open_by_id: openByIdDialog, open_reference: openReferenceDialog,
     add_overlay: () => addOverlayDialog(), load_filter: () => loadFilterDialog(0), load_annotations: loadAnnotationsDialog,
     save_annotations: saveAnnotations, save_annotations_as: saveAnnotationsAs, save_spectra: saveSpectraDialog,
     export_csv: exportCsvDialog, save_cube: saveCubeDialog, quit,
@@ -1494,6 +1564,7 @@ async function main() {
   sync({ image: true, display: true });
   document.getElementById("loading").classList.add("hidden");
   document.getElementById("demo-button").onclick = openDemo;
+  document.getElementById("pavia-button").onclick = () => openDataset("pavia_university");
 
   // Open a file dropped on the canvas.
   const center = document.getElementById("center");
@@ -1505,8 +1576,10 @@ async function main() {
   });
   window.addEventListener("beforeunload", (e) => { if (S.modified) { e.preventDefault(); e.returnValue = ""; } });
 
-  // ?demo opens the demo cube straight away.
-  if (new URLSearchParams(location.search).has("demo")) await openDemo();
+  // ?demo opens the demo cube straight away, ?demo=pavia the Pavia University scene.
+  const demo = new URLSearchParams(location.search).get("demo");
+  if (demo === "pavia") await openDataset("pavia_university");
+  else if (demo !== null) await openDemo();
 }
 
 main();

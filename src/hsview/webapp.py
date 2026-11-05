@@ -40,6 +40,7 @@ from .analysis.segmentation import (
 )
 from .annotations import CLASS_COLORS, CLASS_NAMES, CLASS_PLOT_COLORS, AnnotationStore, mean_spectra
 from .app_icon_svg import APP_ICONS, DEFAULT_APP_ICON
+from .datasets import DATASETS, OPENERS
 from .io import (
     Cube,
     LoadError,
@@ -138,6 +139,11 @@ def ui_tables() -> dict:
         "icon_sizes": list(ICON_SIZES),
         "styles": STYLE_LABELS,
         "icons": ICON_SVG,
+        "datasets": {d.key: {"title": d.title, "description": d.description, "credit": d.credit, "page": d.page,
+                             "size": d.size,
+                             "files": {role: {"name": f.name, "size": f.size, "urls": list(f.urls)}
+                                       for role, f in d.files.items()}}
+                     for d in DATASETS.values()},
         "app_icons": {k: {"label": label, "svg": svg} for k, (label, svg) in APP_ICONS.items()},
         "default_app_icon": DEFAULT_APP_ICON,
         "class_names": CLASS_NAMES,
@@ -220,6 +226,15 @@ class WebApp:
         self.add_overlay_array(lbl, "demo_cube_segmentation")
         self.set_overlay_visible(self.current_overlay, False)
         return self.info()
+
+    def open_dataset(self, key: str, paths: dict) -> dict:
+        """Open a downloaded example scene (see hsview.datasets) with its ground truth as an overlay."""
+        cube, seg = OPENERS[key](paths["cube"], paths["ground_truth"])
+        self.set_cube(cube)
+        self.add_segmentation(seg, f"{cube.name} ground truth")
+        info = self.info()
+        info["messages"] = [f"{DATASETS[key].title}: {DATASETS[key].description}. {cube.metadata['wavelength_note']}"]
+        return info
 
     def set_cube(self, cube: Cube):
         self.cube = cube
@@ -779,7 +794,7 @@ class WebApp:
                     self._label_cache[ov.key] = label_spectra(cube, ov.data)
                 for v, spec in self._label_cache[ov.key].items():
                     out.append({"y": _floats(spec), "color": _color_hex(ov.label_color(v)), "width": 1.2,
-                                "dash": "dashed", "label": f"{ov.name} {v}"})
+                                "dash": "dashed", "label": ov.label_text(v)})
         stats = mean_spectra(cube, self.store)
         if by_class:
             for cls in sorted({a.cls for a, *_ in stats}):

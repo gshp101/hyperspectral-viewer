@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QScrollArea,
     QWidgetAction,
 )
@@ -28,6 +29,7 @@ from .. import __version__
 from .. import annotations as ann_io
 from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
 from ..analysis.segmentation import is_segmentation_file, save_segmentation, segmentation_from_labels
+from ..datasets import OPENERS, PAVIA_UNIVERSITY, cache_dir, cached_files, download
 from ..io import CUBE_SAVE_FILTER, Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
 from ..ui_spec import BIAS_STEP, CONTRAST_STEP, TRUE_COLOUR, menu_layout
 from .actions import ActionRegistry
@@ -194,6 +196,8 @@ class MainWindow(QMainWindow):
         slots = {
             "open_cube": self.open_cube_dialog,
             "open_by_id": self.open_by_id_dialog,
+            "open_demo": self.open_demo,
+            "open_pavia": lambda: self.open_dataset(PAVIA_UNIVERSITY),
             "open_reference": lambda: self.display.reference.load_dialog(),
             "add_overlay": lambda: self.overlays.add_dialog(),
             "load_filter": lambda: self.display.channels[0].load_filter_dialog(),
@@ -484,6 +488,68 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Open by id", str(exc2))
                 return
         self.open_cube(path)
+
+    def open_demo(self) -> bool:
+        from ..demo import make_demo_cube
+
+        if not self.confirm_discard_annotations():
+            return False
+        ref, wl, lbl, rgb = make_demo_cube()
+        self.set_cube(Cube(ref, wl, "", "demo_cube", reference=rgb))
+        ov = self.overlays.add_array(lbl, "demo_cube_segmentation")
+        if ov is not None:
+            self.overlays.set_visible(ov.key, False)
+        self.statusBar().showMessage("Demo cube: 160 × 120 pixels, 100 bands, with a reference photo and a hidden "
+                                     "label overlay", 8000)
+        return True
+
+    def open_dataset(self, dataset) -> bool:
+        """Open a public example scene, downloading it into the cache the first time."""
+        if not self.confirm_discard_annotations():
+            return False
+        paths = cached_files(dataset)
+        if paths is None:
+            mb = dataset.size / 1e6
+            if QMessageBox.question(self, dataset.title,
+                                    f"Download {dataset.title} ({mb:.0f} MB)?\n\n{dataset.description}.\n\n"
+                                    f"{dataset.credit}\n\nIt is kept in {cache_dir()} so it is only "
+                                    f"downloaded once.") != QMessageBox.StandardButton.Yes:
+                return False
+            dlg = QProgressDialog(f"Downloading {dataset.title}…", "Cancel", 0, 1000, self)
+            dlg.setWindowTitle(dataset.title)
+            dlg.setWindowModality(Qt.WindowModality.WindowModal)
+            dlg.setMinimumDuration(0)
+
+            def progress(done, total):
+                dlg.setValue(int(1000 * done / max(total, 1)))
+                dlg.setLabelText(f"Downloading {dataset.title}: {done / 1e6:.1f} of {total / 1e6:.1f} MB")
+                QApplication.processEvents()
+                return not dlg.wasCanceled()
+
+            try:
+                paths = download(dataset, progress=progress)
+            except Exception as exc:
+                dlg.close()
+                if str(exc) != "Download cancelled":
+                    QMessageBox.warning(self, f"Could not download {dataset.title}",
+                                        f"{exc}\n\nYou can also download the files from {dataset.page} "
+                                        f"into {cache_dir() / dataset.key}.")
+                return False
+            dlg.close()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            cube, seg = OPENERS[dataset.key](paths["cube"], paths["ground_truth"])
+        except Exception as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, f"Could not open {dataset.title}", str(exc))
+            return False
+        QApplication.restoreOverrideCursor()
+        self.set_cube(cube)
+        self.overlays.add_segmentation(seg, f"{cube.name} ground truth")
+        self.statusBar().showMessage(f"{dataset.title}: {dataset.description}. {cube.metadata['wavelength_note']}",
+                                     12000)
+        self._update_actions()
+        return True
 
     def open_cube(self, path, **kwargs) -> bool:
         if not self.confirm_discard_annotations():

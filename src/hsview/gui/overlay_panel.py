@@ -22,7 +22,7 @@ from ..io import LoadError, is_label_image, load_overlay
 from ..overlays import Overlay, colorize, label_colors  # noqa: F401 (re-exported)
 from .image_view import ImageView
 
-OVERLAY_FILTER = "Images and arrays (*.npy *.npz *.tif *.tiff *.png *.jpg *.bmp *.h5 *.hdf5 *.pkl);;All files (*)"
+OVERLAY_FILTER = "Images and arrays (*.npy *.npz *.tif *.tiff *.png *.jpg *.bmp *.h5 *.hdf5 *.mat *.pkl);;All files (*)"
 
 
 class OverlayPanel(QWidget):

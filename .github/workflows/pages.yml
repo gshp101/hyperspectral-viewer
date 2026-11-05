@@ -1,0 +1,47 @@
+# Publishes the browser version to GitHub Pages: https://<owner>.github.io/<repo>/
+# The page loads its Python files from src/hsview, so the site holds web/ and src/hsview/ side by side.
+# One-time setup: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Publish web app
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "src/hsview/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}web/
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r web _site/web
+          find src/hsview -name '*.py' -not -path '*/__pycache__/*' | while read -r f; do install -D -m 644 "$f" "_site/$f"; done
+          rm -f _site/web/serve.py
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>hsview</title>
+          <meta http-equiv="refresh" content="0; url=web/">
+          <a href="web/">Open hsview</a>
+          HTML
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

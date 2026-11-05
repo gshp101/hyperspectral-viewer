@@ -95,7 +95,7 @@ class SpectrumPanel(QWidget):
                 if ov.key not in self._label_cache:
                     self._label_cache[ov.key] = label_spectra(cube, ov.data)
                 for v, spec in self._label_cache[ov.key].items():
-                    ax.plot(x, spec, "--", lw=1.2, color=ov.label_color(v), label=f"{ov.name} {v}")
+                    ax.plot(x, spec, "--", lw=1.2, color=ov.label_color(v), label=ov.label_text(v))
                     n += 1
 
         stats = mean_spectra(cube, self.store)

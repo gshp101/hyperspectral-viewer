@@ -311,9 +311,8 @@ def load_npz(path: str | Path, band_axis: int | None = None, **_) -> Cube:
     return cube_from_dict(d, path.stem, band_axis)
 
 
-def load_mat(path: str | Path, band_axis: int | None = None, **_) -> Cube:
-    """MATLAB files, both v7.3 (HDF5) and older, holding 'hypercube' or 'ref' (+ 'wavelengths', 'lbl')."""
-    path = Path(path)
+def _read_mat(path: Path) -> dict:
+    """The variables of a MATLAB file, v7.3 (HDF5) or older."""
     d = None
     try:
         import hdf5storage
@@ -328,9 +327,21 @@ def load_mat(path: str | Path, band_axis: int | None = None, **_) -> Cube:
             import scipy.io
 
             d = scipy.io.loadmat(str(path), squeeze_me=True)
-        except Exception:
+        except ImportError:
+            raise LoadError(f"{path.name}: reading this MATLAB file needs scipy (pip install scipy)") from None
+    return {k: v for k, v in d.items() if not k.startswith("__")}
+
+
+def load_mat(path: str | Path, band_axis: int | None = None, **_) -> Cube:
+    """MATLAB files, both v7.3 (HDF5) and older, holding 'hypercube' or 'ref' (+ 'wavelengths', 'lbl')."""
+    path = Path(path)
+    try:
+        d = _read_mat(path)
+    except Exception as exc:
+        try:
             return load_hdf5(path, band_axis)  # last resort: treat as a plain HDF5 file
-    d = {k: v for k, v in d.items() if not k.startswith("__")}
+        except Exception:
+            raise exc from None
     if not ({"hypercube", "ref", "frame"} & d.keys()):
         cubes = [k for k, v in d.items() if isinstance(v, np.ndarray) and v.ndim == 3]
         if not cubes:
@@ -423,6 +434,11 @@ def load_overlay(path: str | Path) -> np.ndarray:
             if not names:
                 raise LoadError(f"No 2-D dataset found in {path.name}")
             arr = f[names[0]][()]
+    elif ext == ".mat":
+        arr = next((v for v in _read_mat(path).values() if isinstance(v, np.ndarray) and v.ndim == 2
+                    and v.size > 1), None)
+        if arr is None:
+            raise LoadError(f"No 2-D array found in {path.name}")
     elif ext in (".pkl", ".pickle", ".p"):
         with open(path, "rb") as f:
             arr = pickle.load(f)

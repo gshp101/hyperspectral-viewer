@@ -26,6 +26,10 @@ class ActionSpec:
 BASE_SPECS = [
     # File
     ActionSpec("open_cube", "Open cube…", "open", "Ctrl+O", "Open a hyperspectral cube or image", "File"),
+    ActionSpec("open_demo", "Synthetic demo cube", "", "", "A small made-up cube with a reference photo and labels", "File"),
+    ActionSpec("open_pavia", "Pavia University (download 35 MB)", "", "",
+               "ROSIS airborne scene, 610 × 340 pixels, 103 bands, with its 9-class ground truth. "
+               "Downloaded once, then opened from the cache", "File"),
     ActionSpec("open_by_id", "Open by database id…", "", "", "Open a file from the camera image database", "File"),
     ActionSpec("open_reference", "Open reference image…", "image", "", "Load a photo of the scene to show or blend", "File"),
     ActionSpec("add_overlay", "Add overlay…", "layers", "", "Add a segmentation or processed image on top", "File"),
@@ -176,7 +180,7 @@ def menu_layout(analyses=(), n_channels: int = 3) -> dict:
     channels = [(f"Band channel {c + 1}", [f"ch{c}_band", f"ch{c}_width", f"ch{c}_sum", f"ch{c}_filter", None]
                  + [f"ch{c}_route_{x.lower()}" for x in ROUTES]) for c in range(n_channels)]
     return {
-        "&File": ["open_cube", "open_by_id", "open_reference", "add_overlay", "load_filter", None,
+        "&File": ["open_cube", ("Open example", ["open_demo", "open_pavia"]), "open_by_id", "open_reference", "add_overlay", "load_filter", None,
                   "load_annotations", "save_annotations", "save_annotations_as", None,
                   "save_spectra", "export_csv", "save_cube", "save_segmentation", None, "quit"],
         "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None,

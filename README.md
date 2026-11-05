@@ -44,7 +44,7 @@ View and annotate hyperspectral image cubes. A plain Qt (PyQt6) desktop app: ima
 | | A camera database id: `hsview 123` looks it up in `image_database.db` under `--image-dir`, `$HSVIEW_IMAGE_DIR` or `/Volumes/HyperspectralData/Images` |
 | Reference images | jpg, png, bmp, tif (must match the cube size) |
 | Filters | `.pkl` holding a `(bands,)` vector (dot product) or a `(bands, k)` matrix (fraction of energy in that subspace) |
-| Overlays | `.npy`, `.npz`, `.tif`, `.png`, `.jpg`, `.h5`, `.pkl` (hsview segmentation files keep their colours) |
+| Overlays | `.npy`, `.npz`, `.tif`, `.png`, `.jpg`, `.h5`, `.mat`, `.pkl` (hsview segmentation files keep their colours) |
 | Annotations | Original viewer `.pkl` (`points`, `rects`, `annotation_version`; polygons are added under `polygons`) or `.json`; the training annotations of a saved supervised segmentation |
 
 Wavelengths that are missing, `None` or the wrong length fall back to the band index. DataLook scan collections must be converted with `DataLook.asHSI()` first. Pickles can run code when loaded, so only open files you trust.
@@ -61,6 +61,17 @@ hsview data.pkl --overlay seg.npy --annotations data_annotations.pkl
 python -m hsview.demo demo.pkl # write a synthetic cube (and demo_segmentation.npy) to try
 ```
 
+## Example scenes
+
+*File → Open example* has two cubes to try:
+
+- **Synthetic demo cube**: 160 × 120 pixels, 100 bands, three made-up materials, a reference photo and a hidden label overlay. It is generated on the spot.
+- **Pavia University**: the ROSIS airborne scene over the University of Pavia, Italy, 610 × 340 pixels and 103 bands, with its 9-class ground truth (asphalt, meadows, gravel, trees, painted metal sheets, bare soil, bitumen, self-blocking bricks, shadows) shown as a label overlay. Tick *Overlay classes* in the Spectra panel to plot the mean spectrum of each class.
+
+Pavia University is not part of this repository. The first time it is opened, hsview downloads `PaviaU.mat` and `PaviaU_gt.mat` (35 MB) from the [EHU page that distributes it](https://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes), checks their SHA-256 and keeps them in the cache folder (`~/.cache/hsview/datasets`, or `$HSVIEW_DATA`), so later opens are offline. If the EHU server cannot be reached, the same files are fetched from a copy on GitHub. `python -m hsview.datasets` downloads them from the command line. The data is courtesy of Prof. Paolo Gamba, Telecommunications and Remote Sensing Laboratory, University of Pavia. Credit it if you publish results with it.
+
+The published files carry no wavelengths. hsview spreads the 103 bands evenly over the sensor's 430–860 nm range, so wavelengths shown for this scene are approximate.
+
 ## Browser version
 
 ![Browser version](docs/browser.png)
@@ -71,7 +82,9 @@ python -m hsview.demo demo.pkl # write a synthetic cube (and demo_segmentation.n
 python web/serve.py            # serves the repository and opens http://127.0.0.1:8000/web/
 ```
 
-Any static web server rooted at the repository works too (`python -m http.server`, then open `/web/`), and so does GitHub Pages publishing the repository, because the page loads its Python files from `src/hsview`. Add `?demo` to the address to open the demo cube straight away, or press *Open the demo cube* on the empty window.
+Any static web server rooted at the repository works too (`python -m http.server`, then open `/web/`), because the page loads its Python files from `src/hsview`. Add `?demo` to the address to open the demo cube straight away (`?demo=pavia` for Pavia University), or use the buttons on the empty window.
+
+**Public link.** The *Publish web app* workflow (`.github/workflows/pages.yml`) puts the browser version on GitHub Pages at `https://<owner>.github.io/<repo>/` each time `web/` or `src/hsview/` changes on `main`. Turn it on once under *Settings → Pages → Build and deployment → Source: GitHub Actions*, then run the workflow from the Actions tab (or push to `main`).
 
 What is different in a browser:
 
@@ -82,6 +95,7 @@ What is different in a browser:
 - **Panels** can be closed and resized but not floated or moved to another side. Plot windows open inside the page and can be moved, resized and saved as PNG.
 - **Quit** closes the cube and gives an empty window.
 - **Memory.** The cube is held in the page's memory, so very large cubes (several GB) are better opened in the desktop app.
+- **Pavia University** is tried from the EHU server first and otherwise downloaded from the GitHub copy, since browsers only let a page fetch from servers that allow it. The browser keeps it, so it is downloaded once.
 - The first start downloads Pyodide, numpy and matplotlib (about 50 MB, then cached by the browser). The HDF5, MATLAB, ENVI and TIFF readers are loaded the first time such a file is opened.
 
 `hsview/webapp.py` holds the browser version's state and calls the core functions; it has no GUI code and is tested with pytest like the rest. The JavaScript in `web/` draws the window and the plots.

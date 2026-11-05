@@ -582,3 +582,28 @@ def test_save_processed_cube_from_menu(win, monkeypatch, tmp_path):
     back = load_cube(tmp_path / "processed.h5")
     np.testing.assert_allclose(back.data, win.cube.data)
     assert back.metadata["analysis"][-1]["name"] == "svd_background"
+
+
+def test_open_examples(win, tmp_path, monkeypatch):
+    import scipy.io
+
+    from hsview import datasets
+
+    win.open_demo()
+    assert win.cube.shape == (120, 160, 100) and len(win.overlays.overlays) == 1
+    # A cached download opens without asking; the ground truth comes up as a named label overlay.
+    folder = tmp_path / "pavia_university"
+    folder.mkdir()
+    cube = np.ones((6, 5, 103), np.uint16)
+    gt = np.zeros((6, 5), np.uint8)
+    gt[0, 0] = 4
+    scipy.io.savemat(folder / "PaviaU.mat", {"paviaU": cube})
+    scipy.io.savemat(folder / "PaviaU_gt.mat", {"paviaU_gt": gt})
+    ds = datasets.PAVIA_UNIVERSITY
+    monkeypatch.setattr("hsview.gui.main_window.cached_files",
+                        lambda d: {r: folder / f.name for r, f in d.files.items()})
+    monkeypatch.setitem(datasets.OPENERS, ds.key, lambda a, b: datasets.open_pavia_university(a, b, check=False))
+    assert win.open_dataset(ds)
+    assert win.cube.shape == (6, 5, 103)
+    (ov,) = win.overlays.overlays.values()
+    assert ov.name == "PaviaU ground truth" and ov.label_text(4) == "PaviaU ground truth: Trees"
