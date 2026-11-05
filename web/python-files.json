@@ -1,14 +1,15 @@
 [
   "__init__.py",
+  "analysis/__init__.py",
+  "analysis/background.py",
+  "analysis/segmentation.py",
   "annotations.py",
   "app_icon_svg.py",
+  "datasets.py",
   "demo.py",
   "io.py",
   "overlays.py",
   "processing.py",
   "ui_spec.py",
-  "webapp.py",
-  "analysis/__init__.py",
-  "analysis/background.py",
-  "analysis/segmentation.py"
+  "webapp.py"
 ]

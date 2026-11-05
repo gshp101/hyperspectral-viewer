@@ -70,3 +70,9 @@ class Overlay:
         cols = label_colors(len(values))
         idx = int(np.searchsorted(values, value)) + 1
         return tuple(cols[idx]) if idx < len(cols) else (0.5, 0.5, 0.5)
+
+    def label_text(self, value: int) -> str:
+        """Legend text for one label: the class name when the segmentation has one, else the value."""
+        names = getattr(self.segmentation, "label_names", None) or {}
+        name = names.get(int(value))
+        return f"{self.name}: {name}" if name and name != f"Label {int(value)}" else f"{self.name} {value}"
