@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hsview</title>
-<link rel="icon" id="favicon" href="data:,">
+<link rel="icon" id="favicon" type="image/svg+xml" href="hsview-icon.svg">
 <link rel="stylesheet" href="hsview.css">
 </head>
 <body>
@@ -43,12 +43,20 @@
 </div>
 <div id="loading">
   <div class="loading-box">
-    <img id="loading-icon" alt="" width="96" height="96">
+    <img id="loading-icon" src="hsview-icon.svg" alt="" width="96" height="96">
     <h1>hsview</h1>
     <p id="loading-text">Starting Python (Pyodide)…</p>
     <div class="progress"><div></div></div>
   </div>
 </div>
+<script>
+// Show the icon chosen under View → Application icon while Python loads; hsview-icon.svg is the default.
+try {
+  const svg = JSON.parse(localStorage.getItem("hsview.settings") || "{}")["app/icon_svg"];
+  if (svg) document.getElementById("loading-icon").src = document.getElementById("favicon").href =
+    "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+} catch { /* no storage: keep the default */ }
+</script>
 <div id="busy" hidden><div class="busy-box"><div class="spinner"></div><span id="busy-text">Working…</span></div></div>
 <div id="layer"></div>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>

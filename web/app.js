@@ -405,6 +405,7 @@ function currentAppIcon() { const k = settings.get("app/icon", T.default_app_ico
 function setAppIcon(key) {
   if (!T.app_icons[key]) key = T.default_app_icon;
   settings.set("app/icon", key);
+  settings.set("app/icon_svg", key === T.default_app_icon ? undefined : T.app_icons[key].svg);  // for the loading screen
   document.getElementById("favicon").href = svgUrl(T.app_icons[key].svg);
 }
 
@@ -1527,7 +1528,6 @@ function defineActions() {
 
 // ------------------------------------------------------------- start
 async function main() {
-  const icon = document.getElementById("loading-icon");
   try {
     await boot();
   } catch (err) {
@@ -1536,7 +1536,6 @@ async function main() {
     document.getElementById("loading-text").textContent = "hsview could not start.\n\n" + String(err && err.message ? err.message : err);
     return;
   }
-  icon.src = svgUrl(T.app_icons[currentAppIcon()].svg);
   setAppIcon(currentAppIcon());
   view = new ImageView(document.getElementById("view"), T.class_colors);
   view.on = {
