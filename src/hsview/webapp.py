@@ -66,6 +66,8 @@ from .processing import (
     spectral_energy,
 )
 from .ui_spec import (
+    RECENT_LIMIT,
+    RECENT_MENU,
     DEFAULT_BIAS,
     DEFAULT_CONTRAST,
     DEFAULT_TOOLBAR_CONFIG,
@@ -146,6 +148,8 @@ def ui_tables() -> dict:
                      for d in DATASETS.values()},
         "app_icons": {k: {"label": label, "svg": svg} for k, (label, svg) in APP_ICONS.items()},
         "default_app_icon": DEFAULT_APP_ICON,
+        "recent_menu": RECENT_MENU,
+        "recent_limit": RECENT_LIMIT,
         "class_names": CLASS_NAMES,
         "class_colors": [_color_hex(c) for c in CLASS_COLORS],
         "class_plot_colors": CLASS_PLOT_COLORS,

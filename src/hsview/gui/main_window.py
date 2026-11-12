@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import QPoint, QSettings, Qt
-from PyQt6.QtGui import QActionGroup
+from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -31,7 +31,7 @@ from ..annotations import CLASS_COLORS, CLASS_NAMES, AnnotationStore
 from ..analysis.segmentation import is_segmentation_file, save_segmentation, segmentation_from_labels
 from ..datasets import OPENERS, PAVIA_UNIVERSITY, cache_dir, cached_files, download
 from ..io import CUBE_SAVE_FILTER, Cube, LoadError, cube_file_filter, load_cube, resolve_image_id, save_cube
-from ..ui_spec import BIAS_STEP, CONTRAST_STEP, TRUE_COLOUR, menu_layout
+from ..ui_spec import BIAS_STEP, CONTRAST_STEP, RECENT_MENU, TRUE_COLOUR, add_recent, menu_layout
 from .actions import ActionRegistry
 from .analysis import ANALYSES
 from .display_panel import REF_ROUTES, ROUTES, DisplayPanel
@@ -196,6 +196,7 @@ class MainWindow(QMainWindow):
         slots = {
             "open_cube": self.open_cube_dialog,
             "open_by_id": self.open_by_id_dialog,
+            "clear_recent": lambda: self._set_recent_files([]),
             "open_demo": self.open_demo,
             "open_pavia": lambda: self.open_dataset(PAVIA_UNIVERSITY),
             "open_reference": lambda: self.display.reference.load_dialog(),
@@ -298,7 +299,12 @@ class MainWindow(QMainWindow):
             if entry is None:
                 menu.addSeparator()
             elif isinstance(entry, tuple):
-                self._add_menu_items(menu.addMenu(entry[0]), entry[1])
+                sub = menu.addMenu(entry[0])
+                self._add_menu_items(sub, entry[1])
+                if entry[0] == RECENT_MENU:
+                    self.recent_menu = sub
+                    sub.setToolTipsVisible(True)
+                    sub.aboutToShow.connect(self._fill_recent_menu)
             else:
                 menu.addAction(self.registry[entry])
 
@@ -466,6 +472,48 @@ class MainWindow(QMainWindow):
     def _remember(self, path):
         self.settings.setValue("paths/last_dir", str(Path(path).parent))
 
+    # ------------------------------------------------------- recent files
+    def recent_files(self) -> list[str]:
+        value = self.settings.value("recent/files", [])
+        if isinstance(value, str):  # QSettings returns a lone item as a string
+            value = [value]
+        return [str(p) for p in (value or [])]
+
+    def _set_recent_files(self, paths):
+        self.settings.setValue("recent/files", list(paths))
+
+    def _fill_recent_menu(self):
+        """The recent cubes, newest first, above the fixed items (Clear recent files)."""
+        menu = self.recent_menu
+        for act in getattr(self, "_recent_entries", []):
+            menu.removeAction(act)
+            act.deleteLater()
+        paths = self.recent_files()
+        first = menu.actions()[0] if menu.actions() else None
+        self._recent_entries = []
+        if not paths:
+            act = QAction("No recent files", menu)
+            act.setEnabled(False)
+            self._recent_entries.append(act)
+        for i, path in enumerate(paths):
+            act = QAction(f"&{i + 1 if i < 9 else 0}. {Path(path).name}", menu)
+            act.setToolTip(path)
+            act.triggered.connect(lambda _, p=path: self.open_recent(p))
+            self._recent_entries.append(act)
+        sep = QAction(menu)
+        sep.setSeparator(True)
+        self._recent_entries.append(sep)
+        menu.insertActions(first, self._recent_entries)
+        self.registry["clear_recent"].setEnabled(bool(paths))
+
+    def open_recent(self, path: str) -> bool:
+        if not Path(path).exists():
+            QMessageBox.warning(self, "Open recent", f"{path}\n\nThis file no longer exists, so it was removed "
+                                                    "from the list.")
+            self._set_recent_files([p for p in self.recent_files() if p != path])
+            return False
+        return self.open_cube(path)
+
     def open_cube_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open hyperspectral cube", self._last_dir(), cube_file_filter())
         if path:
@@ -560,6 +608,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Could not open file", str(exc))
             return False
         self._remember(path)
+        self._set_recent_files(add_recent(self.recent_files(), str(Path(path).resolve())))
         self.set_cube(cube)
         return True
 

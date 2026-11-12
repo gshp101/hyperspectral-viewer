@@ -28,6 +28,14 @@ def test_page_loads_every_qt_free_module():
     assert sorted(listed) == expected
 
 
+def test_loading_screen_icon_is_the_default_app_icon():
+    # The page shows web/hsview-icon.svg before Python has loaded, so it must match the drawing in Python.
+    from hsview.app_icon_svg import APP_ICONS, DEFAULT_APP_ICON
+    assert (WEB / "hsview-icon.svg").read_text().strip() == APP_ICONS[DEFAULT_APP_ICON][1]
+    html = (WEB / "index.html").read_text()
+    assert 'id="loading-icon" src="hsview-icon.svg"' in html
+
+
 def test_webapp_does_not_need_qt():
     code = ("import sys, hsview.webapp; "
             "bad = [m for m in sys.modules if m.startswith(('PyQt', 'hsview.gui', 'matplotlib.backends'))]; "
