@@ -288,6 +288,7 @@ function menuItems(entries) {
   const out = [];
   for (const e of entries) {
     if (e === null) out.push("sep");
+    else if (typeof e === "object" && e.title === T.recent_menu) out.push({ label: e.title, submenu: () => recentMenu(e.items) });
     else if (typeof e === "object") out.push({ label: e.title, submenu: () => menuItems(e.items) });
     else { const m = menuItem(e); if (m) out.push(m); }
   }
@@ -1150,6 +1151,81 @@ async function confirmDiscard() {
   return v === "discard";
 }
 
+// ---------------------------------------------------------- recent files
+// A page cannot reopen a file by its path, so File → Open recent keeps a copy of each cube in the browser's
+// Cache Storage (like the example scenes), keyed by a made-up URL; the list itself is in the settings.
+const RECENT_CACHE = "hsview-recent";
+const RECENT_MAX_BYTES = 500e6;  // larger cubes are listed but not kept, so they must be opened again
+const recentUrl = (id, name) => `/hsview-recent/${id}/${encodeURIComponent(name)}`;
+
+function recentFiles() {
+  const list = settings.get("recent/files", []);
+  return Array.isArray(list) ? list : [];
+}
+
+async function setRecentFiles(list) {
+  const keep = new Set(list.map((r) => r.id));
+  for (const r of recentFiles()) if (!keep.has(r.id)) await dropRecentCopy(r);
+  settings.set("recent/files", list.length ? list : undefined);
+}
+
+async function dropRecentCopy(r) {
+  try {
+    const cache = await caches.open(RECENT_CACHE);
+    await Promise.all(r.files.map((n) => cache.delete(recentUrl(r.id, n))));
+  } catch { /* no Cache API */ }
+}
+
+/** Put the cube just opened at the top of the list, keeping a copy of its files when it fits. */
+async function addRecent(files, mainName) {
+  const size = files.reduce((n, f) => n + f.size, 0);
+  const same = recentFiles().find((r) => r.name === mainName && r.size === size);  // the same file again
+  const entry = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: mainName,
+    files: files.map((f) => f.name), size, kept: false };
+  if (size <= RECENT_MAX_BYTES) {
+    try {
+      const cache = await caches.open(RECENT_CACHE);
+      for (const f of files) await cache.put(recentUrl(entry.id, f.name), new Response(f));
+      entry.kept = true;
+    } catch { /* no Cache API or no space: list it without a copy */ }
+  }
+  await setRecentFiles([entry, ...recentFiles().filter((r) => r !== same)].slice(0, T.recent_limit));
+}
+
+async function openRecent(r) {
+  if (!(await confirmDiscard())) return;
+  let files = null;
+  if (r.kept) {
+    try {
+      const cache = await caches.open(RECENT_CACHE);
+      files = await Promise.all(r.files.map(async (n) => {
+        const hit = await cache.match(recentUrl(r.id, n));
+        if (!hit) throw new Error("gone");
+        return new File([await hit.blob()], n);
+      }));
+    } catch { files = null; }
+  }
+  if (!files) {
+    const why = r.kept ? "The browser no longer has its copy of" : "The browser did not keep a copy of";
+    if (await question("Open recent", `${why} ${r.name} (${(r.size / 1e6).toFixed(0)} MB), so it has to be chosen again. Open it now?`)) {
+      const picked = await pickFiles(CUBE_EXTS.join(","), true);
+      if (picked) await openCubeFiles(picked);
+    }
+    return;
+  }
+  await openCubeFiles(files);
+}
+
+function recentMenu(base) {
+  const list = recentFiles();
+  const items = list.length
+    ? list.map((r, i) => ({ label: `${i < 9 ? i + 1 : 0}. ${r.name}`,
+      tip: `${(r.size / 1e6).toFixed(1)} MB${r.kept ? "" : " (not kept in the browser: you will be asked for it again)"}`,
+      action: () => openRecent(r) }))
+    : [{ label: "No recent files", enabled: false }];
+  return [...items, "sep", ...menuItems(base)];
+}
+
 async function openCubeFiles(files) {
   const written = await writeFiles(files);
   // ENVI: open the header; the data file next to it is found by name.
@@ -1160,6 +1236,7 @@ async function openCubeFiles(files) {
   });
   if (!info) return false;
   cubeLoaded(info);
+  addRecent([...files], main.name).catch((err) => console.warn("Could not update recent files", err));
   return true;
 }
 
@@ -1446,7 +1523,7 @@ function about() {
 function defineActions() {
   const has = () => !!S.has_cube;
   const run = {
-    open_cube: openCubeDialog, open_demo: openDemo, open_pavia: () => openDataset("pavia_university"), open_by_id: openByIdDialog, open_reference: openReferenceDialog,
+    open_cube: openCubeDialog, clear_recent: () => setRecentFiles([]), open_demo: openDemo, open_pavia: () => openDataset("pavia_university"), open_by_id: openByIdDialog, open_reference: openReferenceDialog,
     add_overlay: () => addOverlayDialog(), load_filter: () => loadFilterDialog(0), load_annotations: loadAnnotationsDialog,
     save_annotations: saveAnnotations, save_annotations_as: saveAnnotationsAs, save_spectra: saveSpectraDialog,
     export_csv: exportCsvDialog, save_cube: saveCubeDialog, quit,
@@ -1478,7 +1555,7 @@ function defineActions() {
     about,
   };
   const enabled = {
-    open_reference: has, add_overlay: has, load_filter: has, load_annotations: has, save_annotations: has,
+    clear_recent: () => recentFiles().length > 0, open_reference: has, add_overlay: has, load_filter: has, load_annotations: has, save_annotations: has,
     save_annotations_as: has, save_spectra: has, export_csv: has, plot_points: has, plot_regions: has,
     zoom_in: has, zoom_out: has, zoom_fit: has, zoom_actual: has, prev_band: has, next_band: has, reset_contrast: has,
     clear_annotations: has, select_all: has, save_cube: has, show_rgb: has, contrast_up: has, contrast_down: has,

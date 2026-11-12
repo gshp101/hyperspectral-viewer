@@ -607,3 +607,40 @@ def test_open_examples(win, tmp_path, monkeypatch):
     assert win.cube.shape == (6, 5, 103)
     (ov,) = win.overlays.overlays.values()
     assert ov.name == "PaviaU ground truth" and ov.label_text(4) == "PaviaU ground truth: Trees"
+
+
+def _recent_titles(win):
+    win._fill_recent_menu()
+    return [a.text() for a in win.recent_menu.actions() if not a.isSeparator()]
+
+
+def test_open_recent(win, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    assert _recent_titles(win) == ["No recent files", "Clear recent files"]
+    paths = []
+    for name in ("a.pkl", "b.pkl"):
+        p = tmp_path / name
+        with open(p, "wb") as f:
+            pickle.dump({"ref": np.random.rand(6, 5, 4).astype(np.float32)}, f)
+        assert win.open_cube(str(p))
+        paths.append(str(p.resolve()))
+    assert win.recent_files() == paths[::-1]
+    assert _recent_titles(win) == ["&1. b.pkl", "&2. a.pkl", "Clear recent files"]
+    assert win.registry["clear_recent"].isEnabled()
+
+    # Reopening moves a file to the top; the list survives a restart (same QSettings).
+    win.recent_menu.actions()[1].trigger()
+    assert win.cube.name == "a" and win.recent_files() == paths
+    from hsview.gui.main_window import MainWindow
+    assert MainWindow(win.settings).recent_files() == paths
+
+    # A file that has gone is dropped from the list.
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    (tmp_path / "b.pkl").unlink()
+    assert not win.open_recent(paths[1])
+    assert win.recent_files() == [paths[0]]
+
+    win.registry["clear_recent"].trigger()
+    assert win.recent_files() == []
+    assert _recent_titles(win) == ["No recent files", "Clear recent files"]

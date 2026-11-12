@@ -90,6 +90,7 @@ What is different in a browser:
 
 - **Opening files** uses the browser's file picker (or drag a file onto the image). Pick the `.hdr` and its data file together for ENVI. Files are read into the page and never uploaded anywhere.
 - **Saving** uses the browser's save dialog in Chrome and Edge. Other browsers ask for a file name and download the file. *Save annotations* (Ctrl+S) writes to the same file again only where the save dialog is available.
+- **Open recent** keeps a copy of each cube you open (up to 500 MB each) in the browser's storage, since a web page cannot reopen a file from its path. Larger cubes are listed but the file has to be chosen again. *Clear recent files* removes the copies.
 - **Open by database id** asks for the image folder (Chrome and Edge only).
 - **Settings** (toolbars, shortcuts, panel sizes, dialog values, application icon) are kept in the browser's local storage.
 - **Panels** can be closed and resized but not floated or moved to another side. Plot windows open inside the page and can be moved, resized and saved as PNG.

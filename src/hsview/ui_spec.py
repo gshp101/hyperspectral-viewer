@@ -30,6 +30,7 @@ BASE_SPECS = [
     ActionSpec("open_pavia", "Pavia University (download 35 MB)", "", "",
                "ROSIS airborne scene, 610 × 340 pixels, 103 bands, with its 9-class ground truth. "
                "Downloaded once, then opened from the cache", "File"),
+    ActionSpec("clear_recent", "Clear recent files", "", "", "Empty the File → Open recent list", "File"),
     ActionSpec("open_by_id", "Open by database id…", "", "", "Open a file from the camera image database", "File"),
     ActionSpec("open_reference", "Open reference image…", "image", "", "Load a photo of the scene to show or blend", "File"),
     ActionSpec("add_overlay", "Add overlay…", "layers", "", "Add a segmentation or processed image on top", "File"),
@@ -171,6 +172,15 @@ SMOOTHING = [(0, "Off"), (3, "3 × 3"), (5, "5 × 5"), (7, "7 × 7"), (9, "9 × 
 
 
 # -------------------------------------------------------------------- menus
+RECENT_MENU = "Open recent"  # filled when it opens: the recent files, then these items
+RECENT_LIMIT = 10
+
+
+def add_recent(paths: list[str], path: str, limit: int = RECENT_LIMIT) -> list[str]:
+    """The recent-files list with ``path`` moved or added to the front."""
+    return ([path] + [p for p in paths if p != path])[:limit]
+
+
 def menu_layout(analyses=(), n_channels: int = 3) -> dict:
     """Menu bar layout: lists of action ids, None for a separator, (title, [...]) for a submenu.
 
@@ -180,7 +190,7 @@ def menu_layout(analyses=(), n_channels: int = 3) -> dict:
     channels = [(f"Band channel {c + 1}", [f"ch{c}_band", f"ch{c}_width", f"ch{c}_sum", f"ch{c}_filter", None]
                  + [f"ch{c}_route_{x.lower()}" for x in ROUTES]) for c in range(n_channels)]
     return {
-        "&File": ["open_cube", ("Open example", ["open_demo", "open_pavia"]), "open_by_id", "open_reference", "add_overlay", "load_filter", None,
+        "&File": ["open_cube", (RECENT_MENU, ["clear_recent"]), ("Open example", ["open_demo", "open_pavia"]), "open_by_id", "open_reference", "add_overlay", "load_filter", None,
                   "load_annotations", "save_annotations", "save_annotations_as", None,
                   "save_spectra", "export_csv", "save_cube", "save_segmentation", None, "quit"],
         "&Edit": ["undo", "redo", None, "select_all", "delete_selected", "clear_annotations", None,
